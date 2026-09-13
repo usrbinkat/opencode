@@ -1,7 +1,7 @@
 {
   lib,
   stdenvNoCC,
-  callPackage,
+  bun2nix,
   bun,
   nodejs,
   sysctl,
@@ -11,16 +11,41 @@
   installShellFiles,
   versionCheckHook,
   writableTmpDirAsHomeHook,
-  node_modules ? callPackage ./node-modules.nix { },
+  rev ? "dirty",
 }:
+let
+  packageJson = lib.pipe ../packages/cli/package.json [
+    builtins.readFile
+    builtins.fromJSON
+  ];
+in
 stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "opencode";
-  inherit (node_modules) version src;
-  inherit node_modules;
+  version = "${packageJson.version}+${lib.replaceStrings [ "-" ] [ "." ] rev}";
+
+  src = lib.fileset.toSource {
+    root = ../.;
+    fileset = lib.fileset.intersection (lib.fileset.fromSource (lib.sources.cleanSource ../.)) (
+      lib.fileset.unions [
+        ../packages
+        ../services
+        ../bun.lock
+        ../package.json
+        ../patches
+        ../install
+        ../.github/TEAM_MEMBERS
+      ]
+    );
+  };
+
+  bunDeps = bun2nix.fetchBunDeps {
+    bunNix = ./bun.nix;
+  };
 
   nativeBuildInputs = [
+    bun2nix.hook
     bun
-    nodejs # for patchShebangs node_modules
+    nodejs
     installShellFiles
     makeBinaryWrapper
     models-dev
@@ -28,27 +53,28 @@ stdenvNoCC.mkDerivation (finalAttrs: {
   ];
 
   postPatch = ''
-    # NOTE: Relax Bun version check to be a warning instead of an error
     substituteInPlace packages/script/src/index.ts \
       --replace-fail 'throw new Error(`This script requires bun@''${expectedBunVersionRange}' \
                      'console.warn(`Warning: This script requires bun@''${expectedBunVersionRange}'
   '';
 
-  configurePhase = ''
-    runHook preConfigure
-
-    cp -R ${finalAttrs.node_modules}/. .
-    patchShebangs node_modules
-    patchShebangs packages/*/node_modules
-
-    runHook postConfigure
-  '';
+  bunInstallFlags = [
+    "--frozen-lockfile"
+    "--no-progress"
+  ];
 
   env.MODELS_DEV_API_JSON = "${models-dev}/dist/_api.json";
   env.OPENCODE_DISABLE_MODELS_FETCH = true;
   env.OPENCODE_VERSION = finalAttrs.version;
   env.OPENCODE_CHANNEL = "prod";
   env.NODE_OPTIONS = "--max-old-space-size=4096";
+
+  # bun2nix hook auto-registers:
+  #   bunSetInstallCacheDirPhase — copies bunDeps into BUN_INSTALL_CACHE_DIR
+  #   bunPatchPhase — patchShebangs + writable HOME
+  #   bunNodeModulesInstallPhase — bun install from cache (offline)
+  #   bunLifecycleScriptsPhase — runs lifecycle scripts
+  # No configurePhase override needed.
 
   buildPhase = ''
     runHook preBuild
@@ -70,7 +96,6 @@ stdenvNoCC.mkDerivation (finalAttrs: {
           [
             ripgrep
           ]
-          # bun runs sysctl to detect if running on rosetta2
           ++ lib.optional stdenvNoCC.hostPlatform.isDarwin sysctl
         )
       }
@@ -79,7 +104,6 @@ stdenvNoCC.mkDerivation (finalAttrs: {
   '';
 
   postInstall = lib.optionalString (stdenvNoCC.buildPlatform.canExecute stdenvNoCC.hostPlatform) ''
-    # trick yargs into also generating zsh completions
     installShellCompletion --cmd opencode2 \
       --bash <($out/bin/opencode2 completion) \
       --zsh <(SHELL=/bin/zsh $out/bin/opencode2 completion)
@@ -97,6 +121,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
   versionCheckProgramArg = "--version";
 
   passthru = {
+    inherit (finalAttrs) bunDeps;
     env = finalAttrs.env;
   };
 
@@ -105,6 +130,10 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     homepage = "https://opencode.ai";
     license = lib.licenses.mit;
     mainProgram = "opencode2";
-    inherit (node_modules.meta) platforms;
+    platforms = [
+      "aarch64-linux"
+      "x86_64-linux"
+      "aarch64-darwin"
+    ];
   };
 })
