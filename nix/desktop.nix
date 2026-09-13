@@ -61,15 +61,6 @@ stdenvNoCC.mkDerivation (finalAttrs: {
   bunInstallFlags = [
     "--frozen-lockfile"
     "--no-progress"
-    "--linker=isolated"
-    "--filter"
-    "'!./'"
-    "--filter"
-    "'./packages/cli'"
-    "--filter"
-    "'./packages/desktop'"
-    "--filter"
-    "'./packages/app'"
   ];
 
   env = opencode.env // {
