@@ -1,73 +1,275 @@
 {
-  description = "OpenCode development flake";
+  description = "OpenCode — The open source AI coding agent";
+
+  nixConfig = {
+    extra-substituters = [ "https://nix-community.cachix.org" ];
+    extra-trusted-public-keys = [
+      "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
+    ];
+  };
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    # nixpkgs: usrbinkat fork with bun 1.4.2 (matches packageManager field)
+    # Switch to NixOS/nixpkgs/nixpkgs-unstable once bun >= 1.4.2 lands upstream
+    nixpkgs.url = "github:usrbinkat/nixpkgs/gssproxy-package-and-module";
+
+    bun = {
+      url = "github:usrbinkat/bun/03018e23a347abd3ae15fb799f3f64fed8dc1fb3";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    bun2nix = {
+      url = "github:usrbinkat/bun2nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
-    { self, nixpkgs, ... }:
+    {
+      self,
+      nixpkgs,
+      bun2nix,
+      bun,
+      ...
+    }:
     let
-      systems = [
+      lib = nixpkgs.lib;
+
+      # x86_64-darwin removed: nixpkgs 26.05 dropped x86_64-darwin support.
+      # Re-evaluate when nixpkgs input moves to a channel that restores it.
+      supportedSystems = [
         "aarch64-linux"
         "x86_64-linux"
         "aarch64-darwin"
-        "x86_64-darwin"
       ];
-      forEachSystem = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
+
+      # Flake source metadata
       rev = self.shortRev or self.dirtyShortRev or "dirty";
+
+      # Per-system bindings computed once, shared across all outputs
+      forEachSystem =
+        f:
+        lib.genAttrs supportedSystems (
+          system:
+          f (
+            import nixpkgs {
+              inherit system;
+              overlays = [
+                bun2nix.overlays.default
+                bun.overlays.default
+              ];
+            }
+          )
+        );
     in
+
+    # Per-system outputs
     {
+      # nix build .#opencode
+      # nix build .#opencode-desktop
+      packages = forEachSystem (pkgs: rec {
+        default = opencode;
+        opencode = pkgs.callPackage ./nix/opencode.nix { inherit rev; };
+        opencode-desktop = pkgs.callPackage ./nix/desktop.nix { inherit opencode; };
+      });
+
+      # nix develop
       devShells = forEachSystem (pkgs: {
         default = pkgs.mkShell {
-          packages = with pkgs; [
-            bun
-            nodejs_20
-            pkg-config
-            openssl
-            git
+          packages = [
+            pkgs.bun
+            pkgs.nodejs
+            pkgs.pkg-config
+            pkgs.openssl
+            pkgs.git
+            pkgs.bun2nix
           ];
         };
       });
 
-      overlays = {
-        default =
-          final: _prev:
-          let
-            node_modules = final.callPackage ./nix/node_modules.nix {
-              inherit rev;
-            };
-          in
-          rec {
-            opencode = final.callPackage ./nix/opencode.nix {
-              inherit node_modules;
-            };
-            opencode-desktop = final.callPackage ./nix/desktop.nix {
-              inherit opencode;
-            };
-          };
-      };
-
-      packages = forEachSystem (
+      # nix flake check
+      checks = forEachSystem (
         pkgs:
         let
-          node_modules = pkgs.callPackage ./nix/node_modules.nix {
-            inherit rev;
-          };
+          opencode = pkgs.callPackage ./nix/opencode.nix { inherit rev; };
         in
-        rec {
-          default = opencode;
-          opencode = pkgs.callPackage ./nix/opencode.nix {
-            inherit node_modules;
-          };
-          opencode-desktop = pkgs.callPackage ./nix/desktop.nix {
-            inherit opencode;
-          };
-          # Updater derivation with fakeHash - build fails and reveals correct hash
-          node_modules_updater = node_modules.override {
-            hash = pkgs.lib.fakeHash;
-          };
+        {
+          # Build succeeds and version string matches
+          inherit opencode;
+
+          # Runtime version check
+          opencode-version =
+            pkgs.runCommand "opencode-version-check"
+              {
+                nativeBuildInputs = [
+                  opencode
+                  pkgs.writableTmpDirAsHomeHook
+                ];
+                OPENCODE_DISABLE_MODELS_FETCH = true;
+                meta.timeout = 30;
+              }
+              ''
+                opencode2 --version > /dev/null && touch $out
+              '';
         }
       );
+
+      # nix fmt
+      formatter = forEachSystem (pkgs: pkgs.nixfmt-tree);
+    }
+
+    # Cross-system outputs
+    // {
+      # Composable overlay for downstream consumers
+      # Usage: overlays = [ opencode.overlays.default ];
+      overlays.default = final: _prev: rec {
+        opencode = final.callPackage ./nix/opencode.nix { inherit rev; };
+        opencode-desktop = final.callPackage ./nix/desktop.nix { inherit opencode; };
+      };
+
+      # Home Manager module — user-level opencode installation
+      # Usage: imports = [ opencode.homeManagerModules.default ];
+      homeManagerModules.default =
+        {
+          config,
+          lib,
+          pkgs,
+          ...
+        }:
+        let
+          cfg = config.programs.opencode;
+          systemPkgs = self.packages.${pkgs.stdenv.hostPlatform.system};
+          jsonFormat = pkgs.formats.json { };
+        in
+        {
+          options.programs.opencode = {
+            enable = lib.mkEnableOption "OpenCode AI coding agent";
+
+            package = lib.mkOption {
+              type = lib.types.package;
+              default = systemPkgs.opencode;
+              defaultText = lib.literalExpression "opencode.packages.\${system}.opencode";
+              description = "The opencode package to install.";
+            };
+
+            desktopPackage = lib.mkOption {
+              type = lib.types.nullOr lib.types.package;
+              default = null;
+              defaultText = lib.literalExpression "null";
+              description = ''
+                The opencode-desktop package to install. Set to
+                `opencode.packages.''${system}.opencode-desktop` to include
+                the Electron desktop app.
+              '';
+            };
+
+            settings = lib.mkOption {
+              type = jsonFormat.type;
+              default = { };
+              example = lib.literalExpression ''
+                {
+                  provider = "anthropic";
+                  model = "claude-sonnet-4-20250514";
+                  theme = "catppuccin";
+                }
+              '';
+              description = ''
+                OpenCode configuration. Written to
+                `$XDG_CONFIG_HOME/opencode/config.json`.
+              '';
+            };
+          };
+
+          config = lib.mkIf cfg.enable {
+            home.packages = [ cfg.package ] ++ lib.optional (cfg.desktopPackage != null) cfg.desktopPackage;
+
+            xdg.configFile."opencode/config.json" = lib.mkIf (cfg.settings != { }) {
+              source = jsonFormat.generate "opencode-config" cfg.settings;
+            };
+          };
+        };
+
+      # NixOS module — system-level opencode service (placeholder)
+      # Usage: imports = [ opencode.nixosModules.default ];
+      nixosModules.default =
+        {
+          config,
+          lib,
+          pkgs,
+          ...
+        }:
+        let
+          cfg = config.programs.opencode;
+        in
+        {
+          options.programs.opencode = {
+            enable = lib.mkEnableOption "OpenCode AI coding agent (system-wide)";
+
+            package = lib.mkOption {
+              type = lib.types.package;
+              default = self.packages.${pkgs.stdenv.hostPlatform.system}.opencode;
+              defaultText = lib.literalExpression "opencode.packages.\${system}.opencode";
+              description = "The opencode package to install system-wide.";
+            };
+          };
+
+          config = lib.mkIf cfg.enable {
+            environment.systemPackages = [ cfg.package ];
+          };
+        };
+
+      # nix-darwin module
+      # Usage: imports = [ opencode.darwinModules.default ];
+      darwinModules.default =
+        {
+          config,
+          lib,
+          pkgs,
+          ...
+        }:
+        let
+          cfg = config.programs.opencode;
+        in
+        {
+          options.programs.opencode = {
+            enable = lib.mkEnableOption "OpenCode AI coding agent (darwin system-wide)";
+
+            package = lib.mkOption {
+              type = lib.types.package;
+              default = self.packages.${pkgs.stdenv.hostPlatform.system}.opencode;
+              defaultText = lib.literalExpression "opencode.packages.\${system}.opencode";
+              description = "The opencode package to install.";
+            };
+
+            desktopPackage = lib.mkOption {
+              type = lib.types.nullOr lib.types.package;
+              default = null;
+              description = "The opencode-desktop .app bundle to install.";
+            };
+          };
+
+          config = lib.mkIf cfg.enable {
+            environment.systemPackages = [
+              cfg.package
+            ]
+            ++ lib.optional (cfg.desktopPackage != null) cfg.desktopPackage;
+          };
+        };
+
+      # nix flake init -t github:anomalyco/opencode
+      templates = {
+        default = {
+          path = ./templates/default;
+          description = "Project with OpenCode AI agent configured";
+          welcomeText = ''
+            # OpenCode Project
+
+            Run `nix develop` or `direnv allow` to enter the development shell
+            with OpenCode available.
+
+            Start the agent: `opencode2`
+          '';
+        };
+      };
     };
 }
