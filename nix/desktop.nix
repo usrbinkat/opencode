@@ -5,6 +5,7 @@
   bun2nix,
   bun,
   nodejs,
+  python3,
   darwin,
   callPackage,
   makeWrapper,
@@ -32,6 +33,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     bun2nix.hook
     bun
     nodejs
+    python3
     makeWrapper
     writableTmpDirAsHomeHook
   ]
@@ -65,6 +67,9 @@ stdenvNoCC.mkDerivation (finalAttrs: {
 
   env = opencode.env // {
     ELECTRON_SKIP_BINARY_DOWNLOAD = "1";
+    # Point node-gyp at pre-fetched Electron headers so @electron/rebuild
+    # does not download from electronjs.org inside the nix sandbox.
+    npm_config_nodedir = "${electron.headers}";
   };
 
   postPatch =
@@ -78,6 +83,20 @@ stdenvNoCC.mkDerivation (finalAttrs: {
       substituteInPlace packages/script/src/index.ts \
         --replace-fail 'throw new Error(`This script requires bun@''${expectedBunVersionRange}' \
                        'console.warn(`Warning: This script requires bun@''${expectedBunVersionRange}'
+    ''
+    # build-node.ts resolves a Node.js SEA host binary even in --bundle-only
+    # mode. The resolution downloads Node.js from nodejs.org which fails in
+    # the nix sandbox. Two patches:
+    # 1. Builder resolution: || -> && so bundleOnly=true skips resolveHostNode()
+    # 2. Host smoke test: runs between verifyArtifact (line 103) and the
+    #    bundleOnly continue (line 111), throwing "SEA builder unavailable"
+    #    when builder is undefined. Move the bundleOnly continue before the
+    #    host check.
+    + ''
+      substituteInPlace packages/cli/script/build-node.ts \
+        --replace-fail '!bundleOnly || targets.some' '!bundleOnly && targets.some' \
+        --replace-fail 'if (bundleOnly) await verifyArtifact("dist-node/opencode.mjs")' \
+                       'if (bundleOnly) { await verifyArtifact("dist-node/opencode.mjs"); continue; }'
     ''
     + lib.optionalString stdenvNoCC.hostPlatform.isLinux ''
       substituteInPlace \
@@ -103,17 +122,22 @@ stdenvNoCC.mkDerivation (finalAttrs: {
 
     # Build the opencode node bundle (needed by the desktop sidecar)
     cd packages/cli
-    bun --bun ./script/build-node.ts --skip-install
+    bun --bun ./script/build-node.ts --skip-install --bundle-only
     cd ../..
 
     # Prepare desktop app
     cd packages/desktop
     cp -R icons/prod resources/icons
+    bun ./scripts/copy-metainfo.ts prod
+    # afterPack hook (electron-builder.config.ts:96) aborts if missing.
+    # Runtime: desktop launches this as the CLI sidecar process.
+    cp ${lib.getExe opencode} resources/opencode-cli
     node_modules/.bin/electron-vite build
     node_modules/.bin/electron-builder --dir \
       --config=electron-builder.config.ts \
       --config.electronDist="$HOME/.electron-dist" \
       --config.electronVersion=${electron.version} \
+      --config.npmRebuild=false \
       --config.asarUnpack='**/*.node' \
       ${lib.optionalString stdenvNoCC.hostPlatform.isDarwin "--config.mac.identity=null"}
 
