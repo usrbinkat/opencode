@@ -157,9 +157,33 @@
               default = null;
               defaultText = lib.literalExpression "null";
               description = ''
-                The opencode-desktop package to install. Set to
-                `opencode.packages.''${system}.opencode-desktop` to include
-                the Electron desktop app.
+                The opencode-desktop Electron app package to install.
+
+                NixOS: no GPU wrapping needed — hardware.graphics provides
+                drivers via /run/opengl-driver. Set directly:
+
+                    desktopPackage = opencode.packages.''${system}.opencode-desktop;
+
+                Non-NixOS (home-manager standalone): wrap with nixGL to
+                bridge host GPU drivers. Requires targets.genericLinux.nixGL
+                configured with the correct defaultWrapper for your GPU:
+
+                    Intel/AMD (Mesa):      defaultWrapper = "mesa";
+                    NVIDIA proprietary:    defaultWrapper = "nvidia";
+                    Hybrid Intel+NVIDIA:   defaultWrapper = "nvidia";
+                    PRIME offload render:  defaultWrapper = "nvidiaPrime";
+
+                Then wrap the desktop package:
+
+                    desktopPackage = config.lib.nixGL.wrap
+                      opencode.packages.''${system}.opencode-desktop;
+
+                config.lib.nixGL.wrap is a no-op when nixGL.packages is
+                null, so the same expression works on NixOS (unwrapped)
+                and non-NixOS (wrapped) when nixGL is conditionally set.
+
+                macOS: no wrapping needed — Metal is system-provided.
+                Use darwinModules.default instead.
               '';
             };
 
