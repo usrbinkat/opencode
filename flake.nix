@@ -149,31 +149,73 @@
               defaultText = lib.literalExpression "null";
               description = ''
                 The opencode-desktop Electron app package to install.
+                Electron requires GPU driver access for hardware-accelerated
+                rendering. The integration method depends on the system type.
 
-                NixOS: no GPU wrapping needed — hardware.graphics provides
-                drivers via /run/opengl-driver. Set directly:
+                ## NixOS (all GPU vendors)
+
+                No wrapping or driver config needed. hardware.graphics
+                provides drivers via /run/opengl-driver. Set directly:
 
                     desktopPackage = opencode.packages.''${system}.opencode-desktop;
 
-                Non-NixOS (home-manager standalone): wrap with nixGL to
-                bridge host GPU drivers. Requires targets.genericLinux.nixGL
-                configured with the correct defaultWrapper for your GPU:
+                ## Non-NixOS — recommended: targets.genericLinux.gpu
 
-                    Intel/AMD (Mesa):      defaultWrapper = "mesa";
-                    NVIDIA proprietary:    defaultWrapper = "nvidia";
-                    Hybrid Intel+NVIDIA:   defaultWrapper = "nvidia";
-                    PRIME offload render:  defaultWrapper = "nvidiaPrime";
+                Creates /run/opengl-driver on the host, matching NixOS
+                behavior. Pure eval, no --impure. No per-app wrapping.
+                Requires sudo once after first home-manager switch.
 
-                Then wrap the desktop package:
+                Intel/AMD (zero GPU config):
 
-                    desktopPackage = config.lib.nixGL.wrap
+                    targets.genericLinux.enable = true;
+                    # targets.genericLinux.gpu auto-enables when nixGL is not set
+                    programs.opencode.desktopPackage =
                       opencode.packages.''${system}.opencode-desktop;
+
+                NVIDIA proprietary (pin host driver version):
+
+                    targets.genericLinux.gpu.nvidia.enable = true;
+                    targets.genericLinux.gpu.nvidia.version = "565.77";
+                    targets.genericLinux.gpu.nvidia.sha256 = "sha256-...";
+                    programs.opencode.desktopPackage =
+                      opencode.packages.''${system}.opencode-desktop;
+
+                Then run: sudo /nix/store/HASH-non-nixos-gpu/bin/non-nixos-gpu-setup
+                (home-manager switch prints the exact path)
+
+                Find your NVIDIA version: cat /proc/driver/nvidia/version
+                Get the hash: nix store prefetch-file \
+                  https://download.nvidia.com/XFree86/Linux-x86_64/VERSION/NVIDIA-Linux-x86_64-VERSION.run
+
+                ## Non-NixOS — fallback: targets.genericLinux.nixGL
+
+                No sudo required. Per-app wrapping via config.lib.nixGL.wrap.
+                Requires nixGL flake input.
+
+                Intel/AMD (pure eval):
+
+                    targets.genericLinux.nixGL.packages = nixgl.packages;
+                    targets.genericLinux.nixGL.defaultWrapper = "mesa";
+                    programs.opencode.desktopPackage = config.lib.nixGL.wrap
+                      opencode.packages.''${system}.opencode-desktop;
+
+                NVIDIA (requires --impure or pinned nvidiaVersion in nixGL input):
+
+                    targets.genericLinux.nixGL.packages = nixgl.packages;
+                    targets.genericLinux.nixGL.defaultWrapper = "nvidia";
+                    programs.opencode.desktopPackage = config.lib.nixGL.wrap
+                      opencode.packages.''${system}.opencode-desktop;
+
+                Hybrid Intel+NVIDIA: defaultWrapper = "nvidia"
+                PRIME offload render:  defaultWrapper = "nvidiaPrime"
 
                 config.lib.nixGL.wrap is a no-op when nixGL.packages is
                 null, so the same expression works on NixOS (unwrapped)
-                and non-NixOS (wrapped) when nixGL is conditionally set.
+                and non-NixOS (wrapped).
 
-                macOS: no wrapping needed — Metal is system-provided.
+                ## macOS
+
+                No wrapping needed. Metal is system-provided.
                 Use darwinModules.default instead.
               '';
             };
