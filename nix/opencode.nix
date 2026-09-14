@@ -67,7 +67,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
   env.MODELS_DEV_API_JSON = "${models-dev}/dist/_api.json";
   env.OPENCODE_DISABLE_MODELS_FETCH = true;
   env.OPENCODE_VERSION = finalAttrs.version;
-  env.OPENCODE_CHANNEL = "prod";
+  env.OPENCODE_CHANNEL = "latest";
   env.NODE_OPTIONS = "--max-old-space-size=4096";
 
   # bun2nix hook auto-registers:
