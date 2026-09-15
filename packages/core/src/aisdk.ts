@@ -907,6 +907,8 @@ function jsonObject(input: Record<string, unknown>) {
 function jsonValue(input: unknown): JSONValue {
   try {
     const encoded = JSON.stringify(input)
+    // Round-trip normalizes via toJSON/omission; re-parsing our own stringify output.
+    // ast-grep-ignore: no-json-parse-cast
     return encoded === undefined ? null : (JSON.parse(encoded) as JSONValue)
   } catch {
     return messageValue(input)

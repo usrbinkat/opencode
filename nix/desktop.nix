@@ -78,12 +78,6 @@ stdenvNoCC.mkDerivation (finalAttrs: {
       substituteInPlace packages/desktop/src/main/constants.ts \
         --replace-fail 'app.isPackaged && CHANNEL !== "dev"' 'false'
     ''
-    # Relax Bun version check
-    + ''
-      substituteInPlace packages/script/src/index.ts \
-        --replace-fail 'throw new Error(`This script requires bun@''${expectedBunVersionRange}' \
-                       'console.warn(`Warning: This script requires bun@''${expectedBunVersionRange}'
-    ''
     # build-node.ts resolves a Node.js SEA host binary even in --bundle-only
     # mode. The resolution downloads Node.js from nodejs.org which fails in
     # the nix sandbox. Two patches:

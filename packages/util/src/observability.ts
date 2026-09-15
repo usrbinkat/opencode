@@ -1,5 +1,7 @@
 export * as Observability from "./observability.js"
 
+// NodeFileSystem.layer collides with this module's exported layer function.
+// ast-grep-ignore: no-star-import
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import { LayerNode } from "./effect/layer-node.js"
 import { Effect, Layer, Logger, References, Schema } from "effect"

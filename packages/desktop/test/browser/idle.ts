@@ -112,7 +112,10 @@ async function main() {
     }, signal)
     assert.equal(loads.get("/first"), 2)
     assert.equal(loads.get("/second"), 1, "an inactive tab must stay unloaded")
-    await waitFor(() => states.at(-1)?.browser?.tabs.find((tab) => tab.id === tabID)?.loading === false, signal)
+    await waitFor(() => {
+      const tab = states.at(-1)?.browser?.tabs.find((tab) => tab.id === tabID)
+      return tab !== undefined && tab.generation > saved.tabs[0].generation && !tab.loading
+    }, signal)
     const result = await client
       .rpc(Smoke)
       .execute(
