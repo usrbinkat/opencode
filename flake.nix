@@ -77,12 +77,22 @@
       devShells = forEachSystem (pkgs: {
         default = pkgs.mkShell {
           packages = [
-            pkgs.bun
+            (pkgs.symlinkJoin {
+              name = "bun-development";
+              paths = [ pkgs.bun ];
+              nativeBuildInputs = [ pkgs.makeWrapper ];
+              postBuild = lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+                wrapProgram $out/bin/bun \
+                  --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [ pkgs.stdenv.cc.cc ]}
+                ln -sfn bun $out/bin/bunx
+              '';
+            })
             pkgs.nodejs
             pkgs.pkg-config
             pkgs.openssl
             pkgs.git
             pkgs.bun2nix
+            pkgs.ffmpeg
           ];
         };
       });

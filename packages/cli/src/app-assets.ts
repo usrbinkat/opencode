@@ -15,6 +15,8 @@ export const load = Effect.fn("cli.app-assets.load")(function* () {
 
 function decodeArchive(archive: string) {
   const body = brotliDecompressSync(Buffer.from(archive, "base64")).toString()
+  // Shape guaranteed by cli/script/app-assets.ts which constructs { content, encoding } per file.
+  // ast-grep-ignore: no-json-parse-cast
   return decode(JSON.parse(body) as EncodedAssetMap)
 }
 

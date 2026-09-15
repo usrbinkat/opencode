@@ -22,6 +22,11 @@ const environment = {
     }),
   ),
   HOME: home,
+  // Clones write reflogs; an absent identity can trigger hostname resolution for Git's fallback email.
+  GIT_AUTHOR_NAME: "Test",
+  GIT_AUTHOR_EMAIL: "test@opencode.test",
+  GIT_COMMITTER_NAME: "Test",
+  GIT_COMMITTER_EMAIL: "test@opencode.test",
   OPENCODE_TEST_HOME: home,
   XDG_CONFIG_HOME: path.join(home, ".config"),
   XDG_DATA_HOME: path.join(home, ".local", "share"),

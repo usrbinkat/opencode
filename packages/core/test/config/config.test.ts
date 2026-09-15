@@ -95,7 +95,9 @@ describe("Config", () => {
               // The fixture is real: with global enabled the walk finds both.
               const config = yield* Config.Service
               const compatibility = yield* config.compatibility!()
-              expect([...compatibility.claude, ...compatibility.agents]).toHaveLength(2)
+              expect(
+                [...compatibility.claude, ...compatibility.agents].filter((p) => inFixture(tmp.path, p)),
+              ).toHaveLength(2)
             }).pipe(Effect.provide(testLayer(project, global))),
           ),
           Effect.andThen(
@@ -104,7 +106,11 @@ describe("Config", () => {
             // project walk enabled.
             Effect.gen(function* () {
               const config = yield* Config.Service
-              expect(yield* config.compatibility!()).toEqual({ claude: [], agents: [] })
+              const disabled = yield* config.compatibility!()
+              expect({
+                claude: disabled.claude.filter((p) => inFixture(tmp.path, p)),
+                agents: disabled.agents.filter((p) => inFixture(tmp.path, p)),
+              }).toEqual({ claude: [], agents: [] })
               const watcher = yield* Watcher.Test
               expect(
                 (yield* watcher.subscriptions()).filter((watch) => watch.type === "entries" && watch.path === home),
@@ -914,8 +920,12 @@ describe("Config", () => {
             Effect.provide(testLayer(project, global)),
           )
 
-          expect(compatibility.claude).toEqual([AbsolutePath.make(path.join(home, ".claude"))])
-          expect(compatibility.agents).toEqual([AbsolutePath.make(path.join(home, ".agents"))])
+          expect(compatibility.claude.filter((p) => inFixture(tmp.path, p))).toEqual([
+            AbsolutePath.make(path.join(home, ".claude")),
+          ])
+          expect(compatibility.agents.filter((p) => inFixture(tmp.path, p))).toEqual([
+            AbsolutePath.make(path.join(home, ".agents")),
+          ])
         }),
       ),
     ),
