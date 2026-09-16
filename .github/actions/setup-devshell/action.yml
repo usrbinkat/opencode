@@ -175,7 +175,7 @@ runs:
       id: sea-version
       shell: bash
       run: |
-        version=$(grep -m1 'const NODE_VERSION' packages/cli/script/build-node.ts | grep -oP '"[^"]+"' | tr -d '"')
+        version=$(grep -m1 'const NODE_VERSION' packages/cli/script/build-node.ts | sed -n 's/.*"\([^"]*\)".*/\1/p')
         echo "version=$version" >> "$GITHUB_OUTPUT"
 
     - name: Setup Node SEA build target
