@@ -3,20 +3,48 @@ name: check
 on:
   push:
     branches: [dev, v2]
+    paths:
+      - "packages/*/src/**"
+      - "packages/*/test/**"
+      - "services/*/src/**"
+      - "package.json"
+      - "bun.lock"
+      - "tsconfig*.json"
+      - "script/ast-grep/**"
+      - ".github/workflows/check.yml"
   pull_request:
     branches: [dev, v2]
+    paths:
+      - "packages/*/src/**"
+      - "packages/*/test/**"
+      - "services/*/src/**"
+      - "package.json"
+      - "bun.lock"
+      - "tsconfig*.json"
+      - "script/ast-grep/**"
+      - ".github/workflows/check.yml"
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   check:
     name: typecheck
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
+    timeout-minutes: 15
     steps:
       - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Setup Bun
-        uses: ./.github/actions/setup-bun
+      - uses: ./.github/actions/setup-devshell
 
       - name: Run checks
         run: bun run check
+
+      - name: Check Effect patterns
+        run: bun run lint:effect-patterns
+
+      - name: Check Effect simplifications
+        run: bun run lint:effect-simplifications

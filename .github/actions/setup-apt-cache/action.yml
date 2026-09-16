@@ -1,0 +1,31 @@
+name: Setup apt cache
+description: >
+  Cache apt package archives to speed up repeated apt-get install
+  calls across workflow runs.
+
+inputs:
+  key-suffix:
+    description: Suffix appended to the cache key for disambiguation
+    required: true
+  packages:
+    description: Space-separated list of packages to install
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Restore apt cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/apt-cache
+        key: ${{ runner.os }}-apt-${{ inputs.key-suffix }}-${{ hashFiles('.github/workflows/publish.yml') }}
+        restore-keys: |
+          ${{ runner.os }}-apt-${{ inputs.key-suffix }}-
+
+    - name: Install packages
+      shell: bash
+      run: |
+        mkdir -p ~/apt-cache && chmod -R a+rw ~/apt-cache
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends -o dir::cache::archives="$HOME/apt-cache" ${{ inputs.packages }}
+        sudo chmod -R a+rw ~/apt-cache

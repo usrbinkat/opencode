@@ -1,0 +1,67 @@
+name: Check team membership
+description: >
+  Determine whether the author of an issue or PR is exempt from
+  automated checks. Exempt authors: organization owners, members,
+  the opencode-agent bot, and logins listed in .github/TEAM_MEMBERS.
+  Also outputs the member list as JSON for batch operations.
+
+inputs:
+  login:
+    description: GitHub login of the author (empty to only output the member list)
+    required: false
+    default: ""
+  association:
+    description: Author association (OWNER, MEMBER, CONTRIBUTOR, etc.)
+    required: false
+    default: ""
+
+outputs:
+  exempt:
+    description: "'true' when the author should skip automated checks"
+    value: ${{ steps.check.outputs.exempt }}
+  members:
+    description: "JSON array of team member logins from .github/TEAM_MEMBERS"
+    value: ${{ steps.check.outputs.members }}
+
+runs:
+  using: composite
+  steps:
+    - name: Evaluate membership
+      id: check
+      shell: bash
+      run: |
+        # Always output the member list
+        if [ -f ".github/TEAM_MEMBERS" ]; then
+          MEMBERS_JSON=$(grep -v '^\s*$' .github/TEAM_MEMBERS | tr '[:upper:]' '[:lower:]' | jq -R . | jq -sc .)
+        else
+          MEMBERS_JSON="[]"
+        fi
+        echo "members=$MEMBERS_JSON" >> "$GITHUB_OUTPUT"
+
+        # Skip exemption check if no login provided (list-only mode)
+        if [ -z "$INPUT_LOGIN" ]; then
+          echo "exempt=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        LOGIN="$INPUT_LOGIN"
+        ASSOCIATION="$INPUT_ASSOCIATION"
+
+        if [ "$LOGIN" = "opencode-agent[bot]" ] ||
+           [ "$ASSOCIATION" = "OWNER" ] ||
+           [ "$ASSOCIATION" = "MEMBER" ]; then
+          echo "exempt=true" >> "$GITHUB_OUTPUT"
+          echo "Exempt: $LOGIN ($ASSOCIATION) — org member or bot"
+          exit 0
+        fi
+
+        if [ -f ".github/TEAM_MEMBERS" ] && grep -qxiF "$LOGIN" .github/TEAM_MEMBERS; then
+          echo "exempt=true" >> "$GITHUB_OUTPUT"
+          echo "Exempt: $LOGIN — listed in TEAM_MEMBERS"
+          exit 0
+        fi
+
+        echo "exempt=false" >> "$GITHUB_OUTPUT"
+      env:
+        INPUT_LOGIN: ${{ inputs.login }}
+        INPUT_ASSOCIATION: ${{ inputs.association }}

@@ -1,0 +1,14 @@
+name: Notify Discord
+description: Send a formatted release embed to a Discord webhook.
+
+inputs:
+  webhook-url:
+    description: Discord webhook URL
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: SethCohen/github-releases-to-discord@24d166886aee4646d448c8a389ff9e1ebcab3682 # v1.20.0
+      with:
+        webhook_url: ${{ inputs.webhook-url }}

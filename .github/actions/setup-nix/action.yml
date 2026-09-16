@@ -1,0 +1,137 @@
+name: Setup Nix
+description: >
+  Install Nix, enable GHA-level caching, and optionally configure Cachix
+  binary cache push. The Cachix namespace derives from github.repository_owner
+  so any fork pushes to its own cache without hardcoded names.
+
+inputs:
+  # install-nix-action
+  install-url:
+    description: URL to install Nix from (pin a specific release or test pre-release)
+    required: false
+    default: ""
+  install-options:
+    description: Additional flags passed to the Nix installer script
+    required: false
+    default: ""
+  extra-nix-config:
+    description: Additional configuration appended to /etc/nix/nix.conf
+    required: false
+    default: ""
+  nix-path:
+    description: Value for the NIX_PATH environment variable (e.g. nixpkgs=channel:nixos-unstable)
+    required: false
+    default: ""
+  github-access-token:
+    description: GitHub token for Nix to use when pulling from GitHub repositories
+    required: false
+    default: ${{ github.token }}
+  enable-kvm:
+    description: Enable KVM for hardware-accelerated virtualization on Linux
+    required: false
+    default: "true"
+
+  # magic-nix-cache-action
+  use-flakehub:
+    description: Upload build results to FlakeHub Cache
+    required: false
+    default: "false"
+  use-gha-cache:
+    description: Upload build results to the GitHub Actions cache
+    required: false
+    default: "true"
+  upstream-cache:
+    description: Upstream cache whose store paths are not re-cached in GHA
+    required: false
+    default: https://cache.nixos.org
+  diagnostic-endpoint:
+    description: Endpoint for diagnostics and performance data (empty disables)
+    required: false
+    default: ""
+  diff-store:
+    description: Diff the store before and after the cache action runs
+    required: false
+    default: "false"
+
+  # cachix-action
+  cachix-auth-token:
+    description: Cachix auth token (empty skips Cachix setup)
+    required: false
+    default: ""
+  cachix-signing-key:
+    description: Private signing key for self-signed Cachix caches
+    required: false
+    default: ""
+  cachix-extra-pull-names:
+    description: Comma-separated list of additional Cachix caches to pull from
+    required: false
+    default: ""
+  cachix-skip-push:
+    description: Only pull from the cache, do not push build results
+    required: false
+    default: "false"
+  cachix-use-daemon:
+    description: Push store paths as they are built via post-build hooks
+    required: false
+    default: "true"
+  cachix-push-filter:
+    description: Regex to exclude derivations from being pushed
+    required: false
+    default: ""
+  cachix-skip-adding-substituter:
+    description: Skip adding the cache as a Nix substituter
+    required: false
+    default: "false"
+  cachix-cachix-args:
+    description: Additional arguments passed to Cachix commands
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Install Nix
+      uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+      with:
+        install_url: ${{ inputs.install-url }}
+        install_options: ${{ inputs.install-options }}
+        extra_nix_config: ${{ inputs.extra-nix-config }}
+        nix_path: ${{ inputs.nix-path }}
+        github_access_token: ${{ inputs.github-access-token }}
+        enable_kvm: ${{ inputs.enable-kvm }}
+
+    # GHA cache has a 10 GB limit; Cachix is the durable binary cache.
+    - name: Enable GHA Nix cache
+      uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7 # v15
+      with:
+        use-flakehub: ${{ inputs.use-flakehub }}
+        use-gha-cache: ${{ inputs.use-gha-cache }}
+        upstream-cache: ${{ inputs.upstream-cache }}
+        diagnostic-endpoint: ${{ inputs.diagnostic-endpoint }}
+        diff-store: ${{ inputs.diff-store }}
+
+    - name: Check Cachix credentials
+      id: cachix-creds
+      shell: bash
+      run: |
+        if [ -n "$TOKEN" ]; then
+          echo "available=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "available=false" >> "$GITHUB_OUTPUT"
+        fi
+      env:
+        TOKEN: ${{ inputs.cachix-auth-token }}
+
+    - name: Configure Cachix
+      if: steps.cachix-creds.outputs.available == 'true'
+      uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
+      with:
+        name: ${{ github.repository_owner }}
+        authToken: ${{ inputs.cachix-auth-token }}
+        signingKey: ${{ inputs.cachix-signing-key }}
+        extraPullNames: ${{ inputs.cachix-extra-pull-names }}
+        skipPush: ${{ inputs.cachix-skip-push }}
+        useDaemon: ${{ inputs.cachix-use-daemon }}
+        pushFilter: ${{ inputs.cachix-push-filter }}
+        skipAddingSubstituter: ${{ inputs.cachix-skip-adding-substituter }}
+        cachixArgs: ${{ inputs.cachix-cachix-args }}

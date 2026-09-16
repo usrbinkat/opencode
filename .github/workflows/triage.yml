@@ -6,42 +6,35 @@ on:
 
 jobs:
   triage:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
+    timeout-minutes: 30
     permissions:
       contents: read
       issues: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
 
-      - name: Check exempt issue author
+      - name: Check team membership
         id: author
-        run: |
-          LOGIN="${{ github.event.issue.user.login }}"
-          ASSOCIATION="${{ github.event.issue.author_association }}"
+        uses: ./.github/actions/check-team-member
+        with:
+          login: ${{ github.event.issue.user.login }}
+          association: ${{ github.event.issue.author_association }}
 
-          if [ "$LOGIN" = "opencode-agent[bot]" ] ||
-             [ "$ASSOCIATION" = "OWNER" ] ||
-             [ "$ASSOCIATION" = "MEMBER" ] ||
-             grep -qxiF "$LOGIN" .github/TEAM_MEMBERS; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "Skipping issue automation for exempt author: $LOGIN ($ASSOCIATION)"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
+      - uses: ./.github/actions/setup-devshell
+        if: steps.author.outputs.exempt != 'true'
 
-      - name: Setup Bun
-        if: steps.author.outputs.skip != 'true'
-        uses: ./.github/actions/setup-bun
-
-      - name: Install opencode
-        if: steps.author.outputs.skip != 'true'
-        run: curl -fsSL https://opencode.ai/install | bash
+      - name: Setup OpenCode
+        if: steps.author.outputs.exempt != 'true'
+        id: opencode
+        uses: ./.github/actions/setup-opencode
+        with:
+          api-key: ${{ secrets.OPENCODE_API_KEY }}
 
       - name: Triage issue
-        if: steps.author.outputs.skip != 'true'
+        if: steps.author.outputs.exempt != 'true' && steps.opencode.outputs.available == 'true'
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

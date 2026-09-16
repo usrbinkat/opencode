@@ -1,0 +1,59 @@
+name: Setup Azure Trusted Signing
+description: >
+  Log in to Azure and sign artifacts using Azure Trusted Signing.
+
+inputs:
+  client-id:
+    description: Azure AD client ID
+    required: true
+  tenant-id:
+    description: Azure AD tenant ID
+    required: true
+  subscription-id:
+    description: Azure subscription ID
+    required: true
+  endpoint:
+    description: Trusted Signing endpoint URL (required when files is set)
+    required: false
+    default: ""
+  account-name:
+    description: Trusted Signing account name (required when files is set)
+    required: false
+    default: ""
+  certificate-profile:
+    description: Trusted Signing certificate profile name (required when files is set)
+    required: false
+    default: ""
+  files:
+    description: Newline-separated list of files to sign (omit to login only)
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Azure login
+      uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+      with:
+        client-id: ${{ inputs.client-id }}
+        tenant-id: ${{ inputs.tenant-id }}
+        subscription-id: ${{ inputs.subscription-id }}
+
+    - name: Sign artifacts
+      if: inputs.files != ''
+      uses: azure/artifact-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+      with:
+        endpoint: ${{ inputs.endpoint }}
+        signing-account-name: ${{ inputs.account-name }}
+        certificate-profile-name: ${{ inputs.certificate-profile }}
+        files: ${{ inputs.files }}
+        exclude-environment-credential: true
+        exclude-workload-identity-credential: true
+        exclude-managed-identity-credential: true
+        exclude-shared-token-cache-credential: true
+        exclude-visual-studio-credential: true
+        exclude-visual-studio-code-credential: true
+        exclude-azure-cli-credential: false
+        exclude-azure-powershell-credential: true
+        exclude-azure-developer-cli-credential: true
+        exclude-interactive-browser-credential: true

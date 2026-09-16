@@ -2,32 +2,42 @@ name: stats
 
 on:
   schedule:
-    - cron: "0 12 * * *" # Run daily at 12:00 UTC
-  workflow_dispatch: # Allow manual trigger
+    - cron: "0 12 * * *"
+  workflow_dispatch:
 
 concurrency: ${{ github.workflow }}-${{ github.ref }}
 
 jobs:
   stats:
-    if: github.repository == 'anomalyco/opencode'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
+    timeout-minutes: 30
     permissions:
       contents: write
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Setup Bun
-        uses: ./.github/actions/setup-bun
+      - name: Check PostHog credentials
+        id: creds
+        uses: ./.github/actions/check-secret
+        with:
+          secret: ${{ secrets.POSTHOG_KEY }}
+
+      - uses: ./.github/actions/setup-devshell
 
       - name: Run stats script
+        if: steps.creds.outputs.available == 'true'
         run: bun script/stats.ts
 
+      - uses: ./.github/actions/setup-git-identity
+        if: steps.creds.outputs.available == 'true'
+        with:
+          name: GitHub Action
+          email: action@github.com
+
       - name: Commit stats
+        if: steps.creds.outputs.available == 'true'
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
           git add STATS.md
           git diff --staged --quiet || git commit -m "ignore: update download stats $(date -I)"
           git push

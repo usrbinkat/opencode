@@ -1,0 +1,195 @@
+name: Setup development shell
+description: >
+  Multi-platform toolchain setup. Linux: Nix devShell.
+  macOS: setup-node + setup-bun. Windows: setup-node + setup-bun.
+
+inputs:
+  cachix-auth-token:
+    description: Cachix auth token (Linux only, empty skips Cachix push)
+    required: false
+    default: ""
+  install-flags:
+    description: Additional flags passed to bun install
+    required: false
+    default: ""
+  bun-version:
+    description: Bun version override (non-Linux only)
+    required: false
+    default: ""
+  node-version:
+    description: Node.js version override (non-Linux only, default 24)
+    required: false
+    default: "24"
+  node-mirror:
+    description: Mirror URL for Node.js binary downloads
+    required: false
+    default: ""
+  node-mirror-token:
+    description: Bearer token for the Node.js mirror
+    required: false
+    default: ""
+  node-sea:
+    description: Install the Node SEA build target version from build-node.ts
+    required: false
+    default: "false"
+  playwright:
+    description: Install Playwright-compatible Node before the toolchain
+    required: false
+    default: "false"
+  playwright-node-version:
+    description: Node.js version for Playwright compatibility
+    required: false
+    default: "24.15"
+  npm-publish:
+    description: Configure npm registry authentication for publishing
+    required: false
+    default: "false"
+  registry-url:
+    description: npm registry URL
+    required: false
+    default: "https://registry.npmjs.org"
+  bun-registries:
+    description: Bun registry configuration lines for scoped/default registries
+    required: false
+    default: ""
+  bun-no-cache:
+    description: Disable caching of the downloaded Bun executable
+    required: false
+    default: "false"
+  opencode:
+    description: Install the OpenCode CLI
+    required: false
+    default: "false"
+  opencode-api-key:
+    description: OpenCode API key (required when opencode is true)
+    required: false
+    default: ""
+
+outputs:
+  opencode-available:
+    description: Whether the OpenCode CLI is installed and API key is set
+    value: ${{ steps.opencode-check.outputs.available }}
+
+runs:
+  using: composite
+  steps:
+    # ── Playwright Node pin (all platforms, before toolchain) ─────────
+    - name: Setup Node for Playwright
+      if: inputs.playwright == 'true'
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: ${{ inputs.playwright-node-version }}
+        mirror: ${{ inputs.node-mirror }}
+        mirror-token: ${{ inputs.node-mirror-token }}
+        package-manager-cache: false
+
+    # ── Linux: Nix devShell ──────────────────────────────────────────
+    - name: Setup Nix
+      if: runner.os == 'Linux'
+      uses: ./.github/actions/setup-nix
+      with:
+        cachix-auth-token: ${{ inputs.cachix-auth-token }}
+
+    - name: Install devShell
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        nix profile install ".#devShells.$(nix eval --raw --expr builtins.currentSystem).default" \
+          --accept-flake-config --profile "$RUNNER_TEMP/devshell" -L
+        echo "$RUNNER_TEMP/devshell/bin" >> "$GITHUB_PATH"
+
+    - name: Configure npm registry (Linux)
+      if: runner.os == 'Linux' && inputs.npm-publish == 'true'
+      shell: bash
+      run: |
+        npm config set registry "${{ inputs.registry-url }}"
+        echo "//$(echo '${{ inputs.registry-url }}' | sed 's|https\?://||')/:_authToken=\${NODE_AUTH_TOKEN}" > "$HOME/.npmrc"
+
+    - name: Install dependencies (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: bun install ${{ inputs.install-flags }}
+
+    # ── macOS / Windows: native toolchain ────────────────────────────
+    - name: Setup Node
+      if: runner.os != 'Linux' && inputs.playwright != 'true'
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: ${{ inputs.node-version }}
+        mirror: ${{ inputs.node-mirror }}
+        mirror-token: ${{ inputs.node-mirror-token }}
+        package-manager-cache: false
+        registry-url: ${{ inputs.npm-publish == 'true' && inputs.registry-url || '' }}
+
+    - name: Setup Bun
+      if: runner.os != 'Linux'
+      uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      with:
+        bun-version: ${{ inputs.bun-version || '' }}
+        bun-version-file: ${{ inputs.bun-version == '' && 'package.json' || '' }}
+        registries: ${{ inputs.bun-registries }}
+        no-cache: ${{ inputs.bun-no-cache }}
+
+    - name: Get Bun cache directory
+      if: runner.os != 'Linux'
+      id: bun-cache
+      shell: bash
+      run: echo "dir=$(bun pm cache)" >> "$GITHUB_OUTPUT"
+
+    - name: Restore Bun cache
+      if: runner.os != 'Linux'
+      id: bun-cache-restore
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.bun-cache.outputs.dir }}
+        key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-bun-
+
+    - name: Install setuptools for distutils compatibility
+      if: runner.os != 'Linux'
+      shell: bash
+      run: python3 -m pip install setuptools || pip install setuptools || true
+
+    - name: Install dependencies (non-Linux)
+      if: runner.os != 'Linux'
+      shell: bash
+      run: |
+        if [ "$RUNNER_OS" = "Windows" ]; then
+          bun install --linker hoisted ${{ inputs.install-flags }}
+        else
+          bun install ${{ inputs.install-flags }}
+        fi
+
+    - name: Save Bun cache
+      if: runner.os != 'Linux' && steps.bun-cache-restore.outputs.cache-hit != 'true' && github.event_name != 'pull_request' && github.event_name != 'pull_request_target'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.bun-cache.outputs.dir }}
+        key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
+
+    # ── Node SEA build target (all platforms, after toolchain) ───────
+    - name: Extract Node SEA version
+      if: inputs.node-sea == 'true'
+      id: sea-version
+      shell: bash
+      run: |
+        version=$(grep -m1 'const NODE_VERSION' packages/cli/script/build-node.ts | grep -oP '"[^"]+"' | tr -d '"')
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
+    - name: Setup Node SEA build target
+      if: inputs.node-sea == 'true'
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: ${{ steps.sea-version.outputs.version }}
+        mirror: ${{ inputs.node-mirror }}
+        mirror-token: ${{ inputs.node-mirror-token }}
+        package-manager-cache: false
+
+    # ── OpenCode CLI (all platforms, after toolchain) ────────────────
+    - name: Setup OpenCode CLI
+      id: opencode-check
+      if: inputs.opencode == 'true'
+      uses: ./.github/actions/setup-opencode
+      with:
+        api-key: ${{ inputs.opencode-api-key }}

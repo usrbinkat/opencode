@@ -1,0 +1,37 @@
+name: Setup OpenCode CLI
+description: >
+  Install the OpenCode CLI via the official installer and verify
+  the OPENCODE_API_KEY secret is available. Requires setup-bun
+  to have run first.
+
+inputs:
+  api-key:
+    description: OpenCode API key (OPENCODE_API_KEY secret)
+    required: false
+    default: ""
+
+outputs:
+  available:
+    description: "'true' when the API key is available and CLI is installed"
+    value: ${{ steps.api-key.outputs.available }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check API key
+      id: api-key
+      shell: bash
+      run: |
+        if [ -n "$KEY" ]; then
+          echo "available=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "available=false" >> "$GITHUB_OUTPUT"
+          echo "::notice::OPENCODE_API_KEY not set — skipping OpenCode CLI install"
+        fi
+      env:
+        KEY: ${{ inputs.api-key }}
+
+    - name: Install OpenCode CLI
+      if: steps.api-key.outputs.available == 'true'
+      shell: bash
+      run: curl -fsSL https://opencode.ai/install | bash

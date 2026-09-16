@@ -1,0 +1,42 @@
+name: Run GitHub Script
+description: >
+  Wrapper around actions/github-script with a single pinned version.
+  Executes inline JavaScript with access to the GitHub API and workflow context.
+
+inputs:
+  script:
+    description: JavaScript to execute
+    required: true
+  github-token:
+    description: Token for the octokit client
+    required: false
+    default: ${{ github.token }}
+  result-encoding:
+    description: "Encoding for the result output: string or json"
+    required: false
+    default: json
+  retries:
+    description: Number of retries for octokit requests
+    required: false
+    default: "0"
+  retry-exempt-status-codes:
+    description: Comma-separated status codes exempt from retry
+    required: false
+    default: "400,401,403,404,422"
+
+outputs:
+  result:
+    description: Return value of the script
+    value: ${{ steps.run.outputs.result }}
+
+runs:
+  using: composite
+  steps:
+    - id: run
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+      with:
+        github-token: ${{ inputs.github-token }}
+        script: ${{ inputs.script }}
+        result-encoding: ${{ inputs.result-encoding }}
+        retries: ${{ inputs.retries }}
+        retry-exempt-status-codes: ${{ inputs.retry-exempt-status-codes }}

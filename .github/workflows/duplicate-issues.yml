@@ -7,41 +7,32 @@ on:
 jobs:
   check-duplicates:
     if: github.event.action == 'opened'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
+    timeout-minutes: 30
     permissions:
       contents: read
       issues: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
 
-      - name: Check exempt issue author
+      - name: Check team membership
         id: author
-        run: |
-          LOGIN="${{ github.event.issue.user.login }}"
-          ASSOCIATION="${{ github.event.issue.author_association }}"
+        uses: ./.github/actions/check-team-member
+        with:
+          login: ${{ github.event.issue.user.login }}
+          association: ${{ github.event.issue.author_association }}
 
-          if [ "$LOGIN" = "opencode-agent[bot]" ] ||
-             [ "$ASSOCIATION" = "OWNER" ] ||
-             [ "$ASSOCIATION" = "MEMBER" ] ||
-             grep -qxiF "$LOGIN" .github/TEAM_MEMBERS; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "Skipping issue automation for exempt author: $LOGIN ($ASSOCIATION)"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - uses: ./.github/actions/setup-bun
-        if: steps.author.outputs.skip != 'true'
-
-      - name: Install opencode
-        if: steps.author.outputs.skip != 'true'
-        run: curl -fsSL https://opencode.ai/install | bash
+      - uses: ./.github/actions/setup-devshell
+        id: devshell
+        if: steps.author.outputs.exempt != 'true'
+        with:
+          opencode: "true"
+          opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
 
       - name: Check duplicates and compliance
-        if: steps.author.outputs.skip != 'true'
+        if: steps.author.outputs.exempt != 'true' && steps.devshell.outputs.opencode-available == 'true'
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -119,7 +110,7 @@ jobs:
 
           [If not compliant:]
           <!-- issue-compliance -->
-          This issue doesn't fully meet our [contributing guidelines](../blob/dev/CONTRIBUTING.md).
+          This issue doesn't fully meet our [contributing guidelines](../blob/${{ github.event.repository.default_branch }}/CONTRIBUTING.md).
 
           **What needs to be fixed:**
           - [specific reasons]
@@ -141,41 +132,32 @@ jobs:
 
   recheck-compliance:
     if: github.event.action == 'edited' && contains(github.event.issue.labels.*.name, 'needs:compliance')
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
+    timeout-minutes: 30
     permissions:
       contents: read
       issues: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
 
-      - name: Check exempt issue author
+      - name: Check team membership
         id: author
-        run: |
-          LOGIN="${{ github.event.issue.user.login }}"
-          ASSOCIATION="${{ github.event.issue.author_association }}"
+        uses: ./.github/actions/check-team-member
+        with:
+          login: ${{ github.event.issue.user.login }}
+          association: ${{ github.event.issue.author_association }}
 
-          if [ "$LOGIN" = "opencode-agent[bot]" ] ||
-             [ "$ASSOCIATION" = "OWNER" ] ||
-             [ "$ASSOCIATION" = "MEMBER" ] ||
-             grep -qxiF "$LOGIN" .github/TEAM_MEMBERS; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "Skipping issue automation for exempt author: $LOGIN ($ASSOCIATION)"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - uses: ./.github/actions/setup-bun
-        if: steps.author.outputs.skip != 'true'
-
-      - name: Install opencode
-        if: steps.author.outputs.skip != 'true'
-        run: curl -fsSL https://opencode.ai/install | bash
+      - uses: ./.github/actions/setup-devshell
+        id: devshell
+        if: steps.author.outputs.exempt != 'true'
+        with:
+          opencode: "true"
+          opencode-api-key: ${{ secrets.OPENCODE_API_KEY }}
 
       - name: Recheck compliance
-        if: steps.author.outputs.skip != 'true'
+        if: steps.author.outputs.exempt != 'true' && steps.devshell.outputs.opencode-available == 'true'
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

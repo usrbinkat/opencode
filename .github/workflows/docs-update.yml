@@ -10,20 +10,24 @@ env:
 
 jobs:
   update-docs:
-    if: github.repository == 'sst/opencode'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
+    timeout-minutes: 30
     permissions:
       id-token: write
       contents: write
       pull-requests: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0 # Fetch full history to access commits
+          fetch-depth: 0
 
-      - name: Setup Bun
-        uses: ./.github/actions/setup-bun
+      - name: Check OpenCode API key
+        id: creds
+        uses: ./.github/actions/check-secret
+        with:
+          secret: ${{ secrets.OPENCODE_API_KEY }}
+
+      - uses: ./.github/actions/setup-devshell
 
       - name: Get recent commits
         id: commits
@@ -42,8 +46,8 @@ jobs:
           fi
 
       - name: Run opencode
-        if: steps.commits.outputs.has_commits == 'true'
-        uses: sst/opencode/github@2c14fc5586fe0b88e5c04732d2e846769cc35671 # latest
+        if: steps.commits.outputs.has_commits == 'true' && steps.creds.outputs.available == 'true'
+        uses: ./github
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
         with:

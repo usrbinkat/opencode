@@ -1,0 +1,55 @@
+name: Setup Playwright
+description: >
+  Read the Playwright version from the workspace catalog, cache browser
+  binaries, install system dependencies on Linux, and install browsers
+  when the cache misses.
+
+inputs:
+  browsers-path:
+    description: Directory for Playwright browser binaries
+    required: false
+    default: ${{ github.workspace }}/.playwright-browsers
+  browser:
+    description: Browser to install
+    required: false
+    default: chromium
+  working-directory:
+    description: Package directory containing the Playwright dependency
+    required: false
+    default: packages/app
+
+outputs:
+  cache-hit:
+    description: "'true' when an exact browser cache hit occurred"
+    value: ${{ steps.cache.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - name: Read Playwright version
+      id: version
+      shell: bash
+      run: |
+        version=$(node -e 'console.log(require("./package.json").workspaces.catalog["@playwright/test"])')
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
+    - name: Cache Playwright browsers
+      id: cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ inputs.browsers-path }}
+        key: ${{ runner.os }}-${{ runner.arch }}-playwright-${{ steps.version.outputs.version }}-${{ inputs.browser }}
+
+    - name: Install Playwright system dependencies
+      if: runner.os == 'Linux'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: bunx playwright install-deps ${{ inputs.browser }}
+
+    - name: Install Playwright browsers
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: bunx playwright install ${{ inputs.browser }}
+      env:
+        PLAYWRIGHT_BROWSERS_PATH: ${{ inputs.browsers-path }}

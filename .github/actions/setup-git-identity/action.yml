@@ -1,0 +1,24 @@
+name: Setup Git identity
+description: >
+  Configure git user.name and user.email globally for bot commits.
+  For commits authenticated via a GitHub App token, use
+  setup-git-committer instead.
+
+inputs:
+  name:
+    description: Git committer name
+    required: false
+    default: opencode
+  email:
+    description: Git committer email
+    required: false
+    default: bot@opencode.ai
+
+runs:
+  using: composite
+  steps:
+    - name: Configure git identity
+      shell: bash
+      run: |
+        git config --global user.name "${{ inputs.name }}"
+        git config --global user.email "${{ inputs.email }}"
