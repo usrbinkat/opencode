@@ -43,8 +43,10 @@ export class Pending<R> {
   create(effect: Effect.Effect<Value, unknown, R>): Effect.Effect<PromiseObj, never, R> {
     return Effect.flatMap(CallSite, (site) => {
       if (this.active.size >= MAX_PENDING_PROMISES) {
-        throw rangeError(
-          `Too many pending promises (limit ${MAX_PENDING_PROMISES}); await promises before creating more.`,
+        return Effect.die(
+          rangeError(
+            `Too many pending promises (limit ${MAX_PENDING_PROMISES}); await promises before creating more.`,
+          ),
         )
       }
       // Allocate before forking so reruns get distinct IDs and diagnostics retain creation order.
