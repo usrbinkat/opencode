@@ -1,6 +1,7 @@
 { callPackage, path }:
 let
-  version = (builtins.fromJSON (builtins.readFile ../packages/desktop/package.json)).devDependencies.electron;
+  version =
+    (builtins.fromJSON (builtins.readFile ../packages/desktop/package.json)).devDependencies.electron;
 in
 (callPackage (path + "/pkgs/development/tools/electron/binary/generic.nix") { }) version {
   # Electron 42.10.1 SHASUMS256.txt; update with the desktop package version.

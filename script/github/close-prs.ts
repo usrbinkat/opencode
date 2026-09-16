@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 
 import { parseArgs } from "util"
+import { requireToken, githubFetch, addLabel } from "./lib.ts"
 
-const defaultRepo = "anomalyco/opencode"
+const defaultRepo = process.env.GITHUB_REPOSITORY ?? "anomalyco/opencode"
 const defaultAgeMonths = 1
 const defaultThreshold = 2
 const defaultSleepMs = 20_000
@@ -61,7 +62,7 @@ if (values.execute && values["dry-run"]) {
 }
 
 const token = await requireToken()
-const repo = requireRepo(values.repo)
+const repo = parseRepo(values.repo)
 const threshold = requirePositiveInteger("threshold", values.threshold)
 const ageMonths = requirePositiveInteger("age-months", values["age-months"])
 const maxClose =
@@ -69,13 +70,6 @@ const maxClose =
 const sleepMs = requireNonNegativeInteger("sleep-ms", values["sleep-ms"])
 const printLimit = requireNonNegativeInteger("print-limit", values["print-limit"])
 const cutoff = subtractMonths(new Date(), ageMonths)
-
-const headers = {
-  Authorization: `Bearer ${token}`,
-  "Content-Type": "application/json",
-  Accept: "application/vnd.github+json",
-  "X-GitHub-Api-Version": "2022-11-28",
-}
 
 type PullRequest = {
   number: number
@@ -95,26 +89,21 @@ type PullRequest = {
   }
 }
 
-type GraphqlResponse = {
-  data?: {
-    rateLimit: {
-      cost: number
-      remaining: number
-      resetAt: string
-    }
-    repository: {
-      pullRequests: {
-        pageInfo: {
-          hasNextPage: boolean
-          endCursor: string | null
-        }
-        nodes: PullRequest[]
+type GraphqlData = {
+  rateLimit: {
+    cost: number
+    remaining: number
+    resetAt: string
+  }
+  repository: {
+    pullRequests: {
+      pageInfo: {
+        hasNextPage: boolean
+        endCursor: string | null
       }
+      nodes: PullRequest[]
     }
   }
-  errors?: Array<{
-    message: string
-  }>
 }
 
 type CleanupCandidate = PullRequest & {
@@ -187,46 +176,57 @@ async function fetchOpenPullRequests() {
   let endCursor: string | null = null
 
   while (true) {
-    const page = await graphql({
-      query: `query($owner: String!, $name: String!, $endCursor: String) {
-        rateLimit {
-          cost
-          remaining
-          resetAt
-        }
-        repository(owner: $owner, name: $name) {
-          pullRequests(first: 100, states: OPEN, orderBy: { field: CREATED_AT, direction: ASC }, after: $endCursor) {
-            pageInfo {
-              hasNextPage
-              endCursor
-            }
-            nodes {
-              number
-              title
-              url
-              createdAt
-              reactionGroups {
-                content
-                users {
-                  totalCount
-                }
+    const response = await githubFetch("https://api.github.com/graphql", {
+      method: "POST",
+      token,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: `query($owner: String!, $name: String!, $endCursor: String) {
+          rateLimit {
+            cost
+            remaining
+            resetAt
+          }
+          repository(owner: $owner, name: $name) {
+            pullRequests(first: 100, states: OPEN, orderBy: { field: CREATED_AT, direction: ASC }, after: $endCursor) {
+              pageInfo {
+                hasNextPage
+                endCursor
               }
-              labels(first: 100) {
-                nodes {
-                  name
+              nodes {
+                number
+                title
+                url
+                createdAt
+                reactionGroups {
+                  content
+                  users {
+                    totalCount
+                  }
+                }
+                labels(first: 100) {
+                  nodes {
+                    name
+                  }
                 }
               }
             }
           }
-        }
-      }`,
-      variables: {
-        owner: repo.owner,
-        name: repo.name,
-        endCursor,
-      },
+        }`,
+        variables: {
+          owner: repo.owner,
+          name: repo.name,
+          endCursor,
+        },
+      }),
     })
 
+    const body: { data?: GraphqlData; errors?: Array<{ message: string }> } = await response.json()
+    if (body.errors?.length)
+      throw new Error(`GitHub GraphQL error: ${body.errors.map((error) => error.message).join(", ")}`)
+    if (!body.data) throw new Error("GitHub GraphQL response did not include data")
+
+    const page = body.data
     prs.push(...page.repository.pullRequests.nodes)
     console.log(
       `Fetched ${prs.length} PRs, GraphQL rate limit remaining ${page.rateLimit.remaining} (cost ${page.rateLimit.cost})`,
@@ -243,86 +243,41 @@ async function fetchOpenPullRequests() {
   }
 }
 
-async function graphql(input: { query: string; variables: Record<string, string | null> }) {
-  const response = await githubRequest("/graphql", {
-    method: "POST",
-    body: JSON.stringify(input),
-  })
-  const body = (await response.json()) as GraphqlResponse
-  if (body.errors?.length)
-    throw new Error(`GitHub GraphQL error: ${body.errors.map((error) => error.message).join(", ")}`)
-  if (!body.data) throw new Error("GitHub GraphQL response did not include data")
-  return body.data
-}
-
 async function closePullRequest(pr: CleanupCandidate) {
-  await githubRequest(`/repos/${repo.owner}/${repo.name}/issues/${pr.number}/comments`, {
+  await githubFetch(`/repos/${repo.owner}/${repo.name}/issues/${pr.number}/comments`, {
     method: "POST",
+    token,
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ body: message }),
   })
-  await githubRequest(`/repos/${repo.owner}/${repo.name}/pulls/${pr.number}`, {
+  await githubFetch(`/repos/${repo.owner}/${repo.name}/pulls/${pr.number}`, {
     method: "PATCH",
+    token,
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ state: "closed" }),
   })
-  await githubRequest(`/repos/${repo.owner}/${repo.name}/issues/${pr.number}/labels`, {
-    method: "POST",
-    body: JSON.stringify({ labels: [cleanupLabel] }),
-  })
+  await addLabel(repo.owner, repo.name, pr.number, cleanupLabel, token)
   console.log(`Closed #${pr.number} positive=${pr.positiveReactions} ${pr.url}`)
 }
 
 async function ensureCleanupLabel() {
-  const response = await fetch(
-    `https://api.github.com/repos/${repo.owner}/${repo.name}/labels/${encodeURIComponent(cleanupLabel)}`,
-    {
-      headers,
-    },
-  )
-  if (response.ok) return
-  if (response.status !== 404)
-    throw new Error(`Failed to check cleanup label: ${response.status} ${response.statusText}`)
-
-  await githubRequest(`/repos/${repo.owner}/${repo.name}/labels`, {
-    method: "POST",
-    body: JSON.stringify({
-      name: cleanupLabel,
-      color: "ededed",
-      description: "PR was closed by automated cleanup",
-    }),
-  })
-}
-
-async function githubRequest(path: string, init: RequestInit, attempt = 0): Promise<Response> {
-  const response = await fetch(path.startsWith("https://") ? path : `https://api.github.com${path}`, {
-    ...init,
-    headers: {
-      ...headers,
-      ...init.headers,
-    },
-  })
-
-  if (response.ok) return response
-
-  const body = await response.text()
-  const retryAfter = response.headers.get("retry-after")
-  const reset = response.headers.get("x-ratelimit-reset")
-  const retryMs = retryAfter
-    ? Number(retryAfter) * 1000
-    : response.headers.get("x-ratelimit-remaining") === "0" && reset
-      ? Math.max(0, Number(reset) * 1000 - Date.now()) + 1_000
-      : body.toLowerCase().includes("secondary rate limit")
-        ? 300_000
-        : response.status >= 500
-          ? Math.min(300_000, 10_000 * 2 ** attempt)
-          : 0
-
-  if ((response.status === 403 || response.status === 429 || response.status >= 500) && retryMs > 0 && attempt < 10) {
-    console.warn(`GitHub request failed; sleeping ${Math.ceil(retryMs / 1000)}s before retry ${attempt + 1}`)
-    await sleep(retryMs)
-    return githubRequest(path, init, attempt + 1)
+  try {
+    await githubFetch(
+      `/repos/${repo.owner}/${repo.name}/labels/${encodeURIComponent(cleanupLabel)}`,
+      { token },
+    )
+  } catch {
+    await githubFetch(`/repos/${repo.owner}/${repo.name}/labels`, {
+      method: "POST",
+      token,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: cleanupLabel,
+        color: "ededed",
+        description: "PR was closed by automated cleanup",
+      }),
+    })
   }
-
-  throw new Error(`GitHub request failed: ${response.status} ${response.statusText}\n${body}`)
 }
 
 function positiveReactionCount(pr: PullRequest) {
@@ -335,29 +290,11 @@ function hasPriorCleanup(pr: PullRequest) {
   return pr.labels.nodes.some((label) => label.name === cleanupLabel)
 }
 
-function requireRepo(value: string | undefined) {
+function parseRepo(value: string | undefined) {
   if (!value) throw new Error("repo is required")
   const [owner, name] = value.split("/")
   if (!owner || !name) throw new Error(`Invalid repo ${value}; expected owner/name`)
   return { owner, name }
-}
-
-async function requireToken() {
-  const envToken = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN
-  if (envToken) return envToken
-
-  const proc = Bun.spawn(["gh", "auth", "token"], {
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  const stdout = await new Response(proc.stdout).text()
-  const stderr = await new Response(proc.stderr).text()
-  const exitCode = await proc.exited
-  if (exitCode === 0 && stdout.trim()) return stdout.trim()
-
-  throw new Error(
-    `GitHub authentication is required. Set GITHUB_TOKEN/GH_TOKEN or run gh auth login.\n${stderr.trim()}`,
-  )
 }
 
 function requirePositiveInteger(name: string, value: string | undefined) {

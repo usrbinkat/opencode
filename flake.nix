@@ -2,9 +2,13 @@
   description = "OpenCode — The open source AI coding agent";
 
   nixConfig = {
-    extra-substituters = [ "https://nix-community.cachix.org" ];
+    extra-substituters = [
+      "https://nix-community.cachix.org"
+      "https://usrbinkat.cachix.org"
+    ];
     extra-trusted-public-keys = [
       "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
+      "usrbinkat.cachix.org-1:+DqaVRWbHXiXIgqBOk0+zr2rsyp+RWPe+pKm7BRROUE="
     ];
   };
 

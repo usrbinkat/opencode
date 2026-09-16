@@ -1,0 +1,95 @@
+# PR runs warm the Cachix binary cache so reviewers and CI consumers hit
+# pre-built paths. Release runs (via workflow_call from publish.yml) push
+# the canonical cache entries from the post-release branch tip.
+name: Nix Build & Cache
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: "Git ref to build (defaults to triggering ref)"
+        required: false
+        type: string
+        default: ""
+    secrets:
+      CACHIX_AUTH_TOKEN:
+        required: false
+
+  push:
+    branches: [v2]
+    paths:
+      - "flake.nix"
+      - "flake.lock"
+      - "nix/**"
+      - "bun.lock"
+      - "package.json"
+      - "packages/*/package.json"
+      - ".github/workflows/nix.yml"
+      - ".github/actions/setup-nix/**"
+
+  pull_request:
+    branches: [v2]
+    paths:
+      - "flake.nix"
+      - "flake.lock"
+      - "nix/**"
+      - "bun.lock"
+      - "package.json"
+      - "packages/*/package.json"
+      - ".github/workflows/nix.yml"
+      - ".github/actions/setup-nix/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  nix:
+    name: Nix ${{ matrix.system }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - system: x86_64-linux
+            runner: ubuntu-24.04
+          - system: aarch64-linux
+            runner: ubuntu-24.04-arm
+          - system: aarch64-darwin
+            runner: macos-15
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - uses: ./.github/actions/setup-nix
+        with:
+          cachix-auth-token: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      - name: Flake structure
+        run: nix flake show --accept-flake-config
+
+      - name: Nix format check
+        run: nix fmt -- --ci
+
+      - name: Flake checks
+        run: nix flake check --accept-flake-config -L
+
+      - name: Install CLI package
+        run: nix profile install .#packages.${{ matrix.system }}.opencode --accept-flake-config -L
+
+      # electron-builder does not produce aarch64-darwin packages from a native arm64 runner;
+      # the publish workflow cross-compiles Darwin desktop targets from dedicated Intel/ARM macOS hosts.
+      - name: Install desktop package
+        if: matrix.system != 'aarch64-darwin'
+        run: nix profile install .#packages.${{ matrix.system }}.opencode-desktop --accept-flake-config -L
+
+      - name: Install devShell
+        run: |
+          nix profile install .#devShells.${{ matrix.system }}.default \
+            --accept-flake-config --profile "$RUNNER_TEMP/devshell" -L

@@ -1,0 +1,23 @@
+name: Setup Apple code signing
+description: Import Apple Developer ID certificates into a build keychain.
+
+inputs:
+  certificate:
+    description: Base64-encoded .p12 certificate (APPLE_CERTIFICATE)
+    required: true
+  certificate-password:
+    description: Certificate passphrase (APPLE_CERTIFICATE_PASSWORD)
+    required: true
+  keychain:
+    description: Keychain name
+    required: false
+    default: build
+
+runs:
+  using: composite
+  steps:
+    - uses: apple-actions/import-codesign-certs@5142e029c445c10ffc7149d172e540235a065466 # v7.0.0
+      with:
+        keychain: ${{ inputs.keychain }}
+        p12-file-base64: ${{ inputs.certificate }}
+        p12-password: ${{ inputs.certificate-password }}

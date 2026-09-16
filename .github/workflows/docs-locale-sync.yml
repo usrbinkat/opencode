@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - dev
+      - v2
     paths:
       - packages/web/src/content/docs/*.mdx
 
@@ -11,19 +12,18 @@ jobs:
   sync-locales:
     if: false
     #if: github.actor != 'opencode-agent[bot]'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
+    timeout-minutes: 30
     permissions:
       contents: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: 0
           ref: ${{ github.ref_name }}
 
-      - name: Setup Bun
-        uses: ./.github/actions/setup-bun
+      - uses: ./.github/actions/setup-devshell
 
       - name: Setup git committer
         id: committer
@@ -48,12 +48,15 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Install OpenCode
+      - name: Setup OpenCode
         if: steps.changes.outputs.has_changes == 'true'
-        run: curl -fsSL https://opencode.ai/install | bash
+        id: opencode
+        uses: ./.github/actions/setup-opencode
+        with:
+          api-key: ${{ secrets.OPENCODE_API_KEY }}
 
       - name: Sync locale docs with OpenCode
-        if: steps.changes.outputs.has_changes == 'true'
+        if: steps.changes.outputs.has_changes == 'true' && steps.opencode.outputs.available == 'true'
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           OPENCODE_CONFIG_CONTENT: |

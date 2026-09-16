@@ -6,90 +6,89 @@ on:
 
 jobs:
   check-duplicates:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
+    timeout-minutes: 30
     permissions:
       contents: read
       pull-requests: write
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 1
+          allow-unsafe-pr-checkout: true
 
       - name: Check team membership
-        id: team-check
-        run: |
-          LOGIN="${{ github.event.pull_request.user.login }}"
-          if [ "$LOGIN" = "opencode-agent[bot]" ] || grep -qxF "$LOGIN" .github/TEAM_MEMBERS; then
-            echo "is_team=true" >> "$GITHUB_OUTPUT"
-            echo "Skipping: $LOGIN is a team member or bot"
-          else
-            echo "is_team=false" >> "$GITHUB_OUTPUT"
-          fi
+        id: author
+        uses: ./.github/actions/check-team-member
+        with:
+          login: ${{ github.event.pull_request.user.login }}
+          association: ${{ github.event.pull_request.author_association }}
 
-      - name: Setup Bun
-        if: steps.team-check.outputs.is_team != 'true'
-        uses: ./.github/actions/setup-bun
+      - uses: ./.github/actions/setup-devshell
+        if: steps.author.outputs.exempt != 'true'
 
-      - name: Install dependencies
-        if: steps.team-check.outputs.is_team != 'true'
-        run: bun install
-
-      - name: Install opencode
-        if: steps.team-check.outputs.is_team != 'true'
-        run: curl -fsSL https://opencode.ai/install | bash
-
-      - name: Build prompt
-        if: steps.team-check.outputs.is_team != 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          {
-            echo "Check for duplicate PRs related to this new PR:"
-            echo ""
-            echo "CURRENT_PR_NUMBER: $PR_NUMBER"
-            echo ""
-            echo "Title: $(gh pr view "$PR_NUMBER" --json title --jq .title)"
-            echo ""
-            echo "Description:"
-            gh pr view "$PR_NUMBER" --json body --jq .body
-          } > pr_info.txt
+      - name: Setup OpenCode
+        if: steps.author.outputs.exempt != 'true'
+        id: opencode
+        uses: ./.github/actions/setup-opencode
+        with:
+          api-key: ${{ secrets.OPENCODE_API_KEY }}
 
       - name: Check for duplicate PRs
-        if: steps.team-check.outputs.is_team != 'true'
+        if: steps.author.outputs.exempt != 'true' && steps.opencode.outputs.available == 'true'
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+          OPENCODE_PERMISSION: |
+            {
+              "bash": {
+                "*": "deny",
+                "gh pr*": "allow",
+                "gh issue*": "allow"
+              },
+              "webfetch": "deny"
+            }
         run: |
-          COMMENT=$(bun script/duplicate-pr.ts -f pr_info.txt "Check the attached file for PR details and search for duplicates")
+          opencode run -m opencode/claude-sonnet-4-6 "A new pull request has been opened:
 
-          if [ "$COMMENT" != "No duplicate PRs found" ]; then
-            gh pr comment "$PR_NUMBER" --body "_The following comment was made by an LLM, it may be inaccurate:_
+          PR number: ${{ github.event.pull_request.number }}
 
-          $COMMENT"
-          fi
+          Lookup this PR with gh pr view ${{ github.event.pull_request.number }}.
+
+          Search through existing open PRs (excluding #${{ github.event.pull_request.number }}) to find potential duplicates.
+          Consider:
+          1. Similar titles or descriptions
+          2. Same files or components being changed
+          3. Related functionality or features
+          4. Similar bug fixes
+
+          If duplicates are found, post a SINGLE comment on PR #${{ github.event.pull_request.number }} using gh pr comment with the following format:
+
+          _The following comment was made by an LLM, it may be inaccurate:_
+
+          This PR might be a duplicate of existing PRs. Please check:
+          - #[pr_number]: [brief description of similarity]
+
+          If no duplicates are found, do NOT comment."
 
   add-contributor-label:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
+      contents: read
       pull-requests: write
       issues: write
     steps:
-      - name: Add Contributor Label
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          script: |
-            const isPR = !!context.payload.pull_request;
-            const issueNumber = isPR ? context.payload.pull_request.number : context.payload.issue.number;
-            const authorAssociation = isPR ? context.payload.pull_request.author_association : context.payload.issue.author_association;
+          allow-unsafe-pr-checkout: true
 
-            if (authorAssociation === 'CONTRIBUTOR') {
-              await github.rest.issues.addLabels({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: issueNumber,
-                labels: ['contributor']
-              });
-            }
+      - uses: ./.github/actions/setup-devshell
+
+      - name: Add contributor label
+        run: bun script/github/add-contributor-label.ts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          AUTHOR_ASSOCIATION: ${{ github.event.pull_request.author_association }}

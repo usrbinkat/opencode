@@ -2,13 +2,22 @@ name: notify-discord
 
 on:
   release:
-    types: [released] # fires when a draft release is published
+    types: [released]
 
 jobs:
   notify:
-    runs-on: blacksmith-4vcpu-ubuntu-2404
+    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
     steps:
-      - name: Send nicely-formatted embed to Discord
-        uses: SethCohen/github-releases-to-discord@24d166886aee4646d448c8a389ff9e1ebcab3682 # v1.20.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check Discord webhook
+        id: creds
+        uses: ./.github/actions/check-secret
         with:
-          webhook_url: ${{ secrets.DISCORD_WEBHOOK }}
+          secret: ${{ secrets.DISCORD_WEBHOOK }}
+
+      - name: Send nicely-formatted embed to Discord
+        if: steps.creds.outputs.available == 'true'
+        uses: ./.github/actions/notify-discord
+        with:
+          webhook-url: ${{ secrets.DISCORD_WEBHOOK }}

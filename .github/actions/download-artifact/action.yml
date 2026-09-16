@@ -1,0 +1,61 @@
+name: Download artifact
+description: Download a build artifact with a single pinned version.
+
+inputs:
+  name:
+    description: Artifact name (omit to download all or use pattern)
+    required: false
+  artifact-ids:
+    description: Comma-separated artifact IDs (mutually exclusive with name)
+    required: false
+  path:
+    description: Destination path (defaults to $GITHUB_WORKSPACE)
+    required: false
+  pattern:
+    description: Glob pattern for artifact names (ignored if name is set)
+    required: false
+  merge-multiple:
+    description: Merge multiple artifacts into the same destination directory
+    required: false
+    default: "false"
+  github-token:
+    description: GitHub token for cross-repo or cross-run downloads
+    required: false
+  repository:
+    description: Owner/repo for cross-repo downloads
+    required: false
+    default: ${{ github.repository }}
+  run-id:
+    description: Workflow run ID for cross-run downloads
+    required: false
+    default: ${{ github.run_id }}
+  skip-decompress:
+    description: Skip automatic extraction of the downloaded artifact
+    required: false
+    default: "false"
+  digest-mismatch:
+    description: "Behavior on digest mismatch: ignore, info, warn, error"
+    required: false
+    default: error
+
+outputs:
+  download-path:
+    description: Path where the artifact was downloaded
+    value: ${{ steps.download.outputs.download-path }}
+
+runs:
+  using: composite
+  steps:
+    - id: download
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      with:
+        name: ${{ inputs.name }}
+        artifact-ids: ${{ inputs.artifact-ids }}
+        path: ${{ inputs.path }}
+        pattern: ${{ inputs.pattern }}
+        merge-multiple: ${{ inputs.merge-multiple }}
+        github-token: ${{ inputs.github-token }}
+        repository: ${{ inputs.repository }}
+        run-id: ${{ inputs.run-id }}
+        skip-decompress: ${{ inputs.skip-decompress }}
+        digest-mismatch: ${{ inputs.digest-mismatch }}

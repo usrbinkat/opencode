@@ -5,6 +5,7 @@
     "bunfig.toml",
     ".npmrc",
     ".github/actions/setup-bun/**",
+    ".github/actions/setup-devshell/**",
     ".github/workflows/test.yml"
   ],
   "globalEnv": ["CI", "OPENCODE_DISABLE_SHARE"],

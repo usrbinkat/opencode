@@ -1,0 +1,29 @@
+name: Check secret availability
+description: >
+  Test whether a secret or credential is available without exposing it.
+  Bridges the GHA limitation where secrets cannot be tested in `if` conditionals.
+
+inputs:
+  secret:
+    description: The secret value to test (pass via ${{ secrets.NAME }})
+    required: true
+
+outputs:
+  available:
+    description: "'true' when the secret is non-empty, 'false' otherwise"
+    value: ${{ steps.check.outputs.available }}
+
+runs:
+  using: composite
+  steps:
+    - name: Test secret
+      id: check
+      shell: bash
+      run: |
+        if [ -n "$SECRET" ]; then
+          echo "available=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "available=false" >> "$GITHUB_OUTPUT"
+        fi
+      env:
+        SECRET: ${{ inputs.secret }}

@@ -1,29 +1,67 @@
-name: "Setup Git Committer"
-description: "Create app token and configure git user"
+name: Setup Git Committer
+description: >
+  Create a GitHub App installation token and configure git for
+  authenticated commits. Uses client-id authentication (v3).
+
 inputs:
   opencode-app-id:
-    description: "OpenCode GitHub App ID"
+    description: OpenCode GitHub App client ID
     required: true
   opencode-app-secret:
-    description: "OpenCode GitHub App private key"
+    description: OpenCode GitHub App private key
     required: true
+  repositories:
+    description: Comma or newline-separated list of repositories to scope the token to
+    required: false
+    default: ""
+  permission-contents:
+    description: "Permission level for contents (read or write)"
+    required: false
+    default: ""
+  permission-pull-requests:
+    description: "Permission level for pull-requests (read or write)"
+    required: false
+    default: ""
+  permission-issues:
+    description: "Permission level for issues (read or write)"
+    required: false
+    default: ""
+  permission-actions:
+    description: "Permission level for actions (read or write)"
+    required: false
+    default: ""
+  skip-token-revoke:
+    description: Keep the token alive after the job completes
+    required: false
+    default: "false"
+
 outputs:
   token:
-    description: "GitHub App token"
+    description: GitHub App installation access token
     value: ${{ steps.apptoken.outputs.token }}
   app-slug:
-    description: "GitHub App slug"
+    description: GitHub App slug
     value: ${{ steps.apptoken.outputs.app-slug }}
+  installation-id:
+    description: GitHub App installation ID
+    value: ${{ steps.apptoken.outputs.installation-id }}
+
 runs:
-  using: "composite"
+  using: composite
   steps:
     - name: Create app token
       id: apptoken
-      uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
+      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
       with:
-        app-id: ${{ inputs.opencode-app-id }}
+        client-id: ${{ inputs.opencode-app-id }}
         private-key: ${{ inputs.opencode-app-secret }}
         owner: ${{ github.repository_owner }}
+        repositories: ${{ inputs.repositories }}
+        permission-contents: ${{ inputs.permission-contents }}
+        permission-pull-requests: ${{ inputs.permission-pull-requests }}
+        permission-issues: ${{ inputs.permission-issues }}
+        permission-actions: ${{ inputs.permission-actions }}
+        skip-token-revoke: ${{ inputs.skip-token-revoke }}
 
     - name: Configure git user
       run: |

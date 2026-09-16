@@ -1,23 +1,86 @@
-name: "Setup Bun"
-description: "Setup Bun with caching and install dependencies"
+name: Setup Bun
+description: Install Bun with caching and install project dependencies.
+
 inputs:
   bun-version:
-    description: "Bun version to install instead of the root packageManager version"
+    description: Bun version to install instead of the root packageManager version
     required: false
     default: ""
   install-flags:
-    description: "Additional flags to pass to 'bun install'"
+    description: Additional flags passed to bun install
     required: false
     default: ""
+  # setup-node passthrough
+  node-version:
+    description: Node.js version for node-gyp compatibility
+    required: false
+    default: "24"
+  node-version-file:
+    description: File containing the Node.js version spec (e.g. .nvmrc, .node-version)
+    required: false
+    default: ""
+  node-check-latest:
+    description: Check for the latest available Node.js version satisfying the spec
+    required: false
+    default: "false"
+  node-architecture:
+    description: Target architecture for Node.js (e.g. x86, x64)
+    required: false
+    default: ""
+  node-token:
+    description: Token for downloading Node.js distributions
+    required: false
+    default: ""
+  node-mirror:
+    description: Mirror URL for Node.js binary downloads
+    required: false
+    default: ""
+  node-mirror-token:
+    description: Bearer token for the Node.js mirror
+    required: false
+    default: ""
+  # setup-bun passthrough
+  bun-version-file:
+    description: File containing the Bun version (e.g. .bun-version, .tool-versions)
+    required: false
+    default: ""
+  registries:
+    description: Registry configuration lines for scoped/default registries
+    required: false
+    default: ""
+  registry-url:
+    description: Registry URL for private packages
+    required: false
+    default: ""
+  scope:
+    description: Scope for private packages (e.g. @myorg)
+    required: false
+    default: ""
+  no-cache:
+    description: Disable caching of the downloaded Bun executable
+    required: false
+    default: "false"
+  bun-token:
+    description: PAT for fetching tags from the oven-sh/bun repository
+    required: false
+    default: ${{ github.token }}
+
 runs:
-  using: "composite"
+  using: composite
   steps:
     # node-gyp@latest (invoked via bunx for native install scripts) requires Node >=22;
     # some runner images ship an older system Node on PATH
     - name: Setup Node
-      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
-        node-version: "24"
+        node-version: ${{ inputs.node-version-file && '' || inputs.node-version }}
+        node-version-file: ${{ inputs.node-version-file }}
+        check-latest: ${{ inputs.node-check-latest }}
+        architecture: ${{ inputs.node-architecture }}
+        token: ${{ inputs.node-token }}
+        mirror: ${{ inputs.node-mirror }}
+        mirror-token: ${{ inputs.node-mirror-token }}
+        package-manager-cache: false
 
     - name: Get baseline download URL
       id: bun-url
@@ -39,8 +102,13 @@ runs:
       uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       with:
         bun-version: ${{ !steps.bun-url.outputs.url && inputs.bun-version || '' }}
-        bun-version-file: ${{ !steps.bun-url.outputs.url && !inputs.bun-version && 'package.json' || '' }}
+        bun-version-file: ${{ !steps.bun-url.outputs.url && inputs.bun-version == '' && (inputs.bun-version-file || 'package.json') || inputs.bun-version-file }}
         bun-download-url: ${{ steps.bun-url.outputs.url }}
+        registries: ${{ inputs.registries }}
+        registry-url: ${{ inputs.registry-url }}
+        scope: ${{ inputs.scope }}
+        no-cache: ${{ inputs.no-cache }}
+        token: ${{ inputs.bun-token }}
 
     - name: Get cache directory
       id: cache
@@ -49,7 +117,7 @@ runs:
 
     - name: Restore Bun dependencies
       id: bun-cache
-      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ steps.cache.outputs.dir }}
         key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
@@ -74,7 +142,7 @@ runs:
 
     - name: Save Bun dependencies
       if: steps.bun-cache.outputs.cache-hit != 'true' && github.event_name != 'pull_request' && github.event_name != 'pull_request_target'
-      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ steps.cache.outputs.dir }}
         key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}

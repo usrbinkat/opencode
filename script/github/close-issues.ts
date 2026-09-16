@@ -1,24 +1,46 @@
 #!/usr/bin/env bun
 
-const repo = "anomalyco/opencode"
-const days = 60
-const msg = `To stay organized issues are automatically closed after ${days} days of no activity. If the issue is still relevant please open a new one.`
+import { parseArgs } from "util"
+import { requireToken, requireRepo, isExempt, githubFetch } from "./lib.ts"
 
-const token = process.env.GITHUB_TOKEN
-if (!token) {
-  console.error("GITHUB_TOKEN environment variable is required")
-  process.exit(1)
+const { values } = parseArgs({
+  args: Bun.argv.slice(2),
+  options: {
+    days: { type: "string", default: "60" },
+    execute: { type: "boolean", default: false },
+    help: { type: "boolean", short: "h", default: false },
+  },
+})
+
+if (values.help) {
+  console.log(`
+Usage: bun script/github/close-issues.ts [options]
+
+Closes issues with no activity for a configurable number of days.
+Exempt authors (team members, org owners, bots) are skipped.
+
+Dry-run by default in local execution. Automatically executes in CI
+when GITHUB_ACTIONS is set.
+
+Options:
+  --days <n>     Inactivity threshold in days (default: 60)
+  --execute      Comment and close matching issues
+  -h, --help     Show this help message
+`)
+  process.exit(0)
 }
 
+const days = Number(values.days)
+if (!Number.isInteger(days) || days <= 0) {
+  console.error("--days must be a positive integer")
+  process.exit(2)
+}
+
+const execute = values.execute || process.env.GITHUB_ACTIONS === "true"
+const token = await requireToken()
+const { owner, repo } = requireRepo()
 const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
-const agentLogin = "opencode-agent[bot]"
-const teamMembers = new Set(
-  (await Bun.file(new URL("../../.github/TEAM_MEMBERS", import.meta.url)).text())
-    .split("\n")
-    .map((line) => line.trim().toLowerCase())
-    .filter(Boolean),
-)
-const teamAssociations = new Set(["OWNER", "MEMBER"])
+const msg = `To stay organized issues are automatically closed after ${days} days of no activity. If the issue is still relevant please open a new one.`
 
 type Issue = {
   number: number
@@ -27,89 +49,60 @@ type Issue = {
   user: { login: string } | null
 }
 
-const headers = {
-  Authorization: `Bearer ${token}`,
-  "Content-Type": "application/json",
-  Accept: "application/vnd.github+json",
-  "X-GitHub-Api-Version": "2022-11-28",
-}
-
-function shouldSkip(i: Issue) {
-  const login = i.user?.login.toLowerCase()
-  return login === agentLogin || (login ? teamMembers.has(login) : false) || teamAssociations.has(i.author_association)
-}
-
-async function close(num: number) {
-  const base = `https://api.github.com/repos/${repo}/issues/${num}`
-
-  const comment = await fetch(`${base}/comments`, {
+async function closeIssue(num: number) {
+  await githubFetch(`/repos/${owner}/${repo}/issues/${num}/comments`, {
     method: "POST",
-    headers,
+    token,
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ body: msg }),
   })
-  if (!comment.ok) throw new Error(`Failed to comment #${num}: ${comment.status} ${comment.statusText}`)
 
-  const patch = await fetch(base, {
+  await githubFetch(`/repos/${owner}/${repo}/issues/${num}`, {
     method: "PATCH",
-    headers,
+    token,
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ state: "closed", state_reason: "not_planned" }),
   })
-  if (!patch.ok) throw new Error(`Failed to close #${num}: ${patch.status} ${patch.statusText}`)
 
-  console.log(`Closed https://github.com/${repo}/issues/${num}`)
+  console.log(`Closed https://github.com/${owner}/${repo}/issues/${num}`)
 }
 
-async function main() {
-  let page = 1
-  let closed = 0
+let page = 1
+let closed = 0
 
-  while (true) {
-    const res = await fetch(
-      `https://api.github.com/repos/${repo}/issues?state=open&sort=updated&direction=asc&per_page=100&page=${page}`,
-      { headers },
-    )
-    if (!res.ok) throw new Error(res.statusText)
+while (true) {
+  const response = await githubFetch(
+    `/repos/${owner}/${repo}/issues?state=open&sort=updated&direction=asc&per_page=100&page=${page}`,
+    { token },
+  )
+  const all: Issue[] = await response.json()
+  if (all.length === 0) break
+  console.log(`Fetched page ${page} with ${all.length} issues`)
 
-    const all = (await res.json()) as Issue[]
-    if (all.length === 0) break
-    console.log(`Fetched page ${page} ${all.length} issues`)
-
-    const stale: number[] = []
-    for (const i of all) {
-      const updated = new Date(i.updated_at)
-      if (updated < cutoff) {
-        if (shouldSkip(i)) {
-          console.log(`Skipping stale issue #${i.number}; author ${i.user?.login ?? "unknown"} is exempt`)
-          continue
-        }
-        stale.push(i.number)
-      } else {
-        console.log(`\nFound fresh issue #${i.number}, stopping`)
-        if (stale.length > 0) {
-          for (const num of stale) {
-            await close(num)
-            closed++
-          }
-        }
-        console.log(`Closed ${closed} issues total`)
-        return
-      }
+  for (const issue of all) {
+    const updated = new Date(issue.updated_at)
+    if (updated >= cutoff) {
+      console.log(`\nFound fresh issue #${issue.number}, stopping`)
+      console.log(`Closed ${closed} issues total`)
+      process.exit(0)
     }
 
-    if (stale.length > 0) {
-      for (const num of stale) {
-        await close(num)
-        closed++
-      }
+    if (await isExempt(issue.user?.login ?? null, issue.author_association)) {
+      console.log(`Skipping stale issue #${issue.number}; author ${issue.user?.login ?? "unknown"} is exempt`)
+      continue
     }
 
-    page++
+    if (!execute) {
+      console.log(`[dry-run] Would close #${issue.number}`)
+      closed++
+      continue
+    }
+
+    await closeIssue(issue.number)
+    closed++
   }
 
-  console.log(`Closed ${closed} issues total`)
+  page++
 }
 
-main().catch((err) => {
-  console.error("Error:", err)
-  process.exit(1)
-})
+console.log(`Closed ${closed} issues total`)
