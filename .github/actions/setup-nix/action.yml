@@ -48,10 +48,6 @@ inputs:
     description: Endpoint for diagnostics and performance data (empty disables)
     required: false
     default: ""
-  diff-store:
-    description: Diff the store before and after the cache action runs
-    required: false
-    default: "false"
 
   # cachix-action
   cachix-auth-token:
@@ -101,19 +97,13 @@ runs:
         enable_kvm: ${{ inputs.enable-kvm }}
 
     # GHA cache has a 10 GB limit; Cachix is the durable binary cache.
-    # env INPUT_DIFF-STORE overrides the action's own default: false
-    # (YAML boolean) which the runner stringifies to empty string in
-    # the post step, crashing getBooleanInput.
     - name: Enable GHA Nix cache
       uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7 # v15
-      env:
-        INPUT_DIFF-STORE: ${{ inputs.diff-store }}
       with:
         use-flakehub: ${{ inputs.use-flakehub }}
         use-gha-cache: ${{ inputs.use-gha-cache }}
         upstream-cache: ${{ inputs.upstream-cache }}
         diagnostic-endpoint: ${{ inputs.diagnostic-endpoint }}
-        diff-store: ${{ inputs.diff-store }}
 
     - name: Check Cachix credentials
       id: cachix-creds
