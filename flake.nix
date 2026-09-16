@@ -65,39 +65,49 @@
             }
           )
         );
+
+      # Shared toolchain consumed by both devShells.default and packages.ci.
+      # Defined as a function of pkgs to eliminate duplication between the
+      # interactive shell and the CI environment package.
+      ciPackages = pkgs: [
+        (pkgs.symlinkJoin {
+          name = "bun-development";
+          paths = [ pkgs.bun ];
+          nativeBuildInputs = [ pkgs.makeWrapper ];
+          postBuild = lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+            wrapProgram $out/bin/bun \
+              --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [ pkgs.stdenv.cc.cc ]}
+            ln -sfn bun $out/bin/bunx
+          '';
+        })
+        pkgs.nodejs
+        pkgs.pkg-config
+        pkgs.openssl
+        pkgs.git
+        pkgs.bun2nix
+        pkgs.ffmpeg
+      ];
     in
 
     # Per-system outputs
     {
       # nix build .#opencode
       # nix build .#opencode-desktop
+      # nix build .#ci
       packages = forEachSystem (pkgs: rec {
         default = opencode;
         opencode = pkgs.callPackage ./nix/opencode.nix { inherit rev; };
         opencode-desktop = pkgs.callPackage ./nix/desktop.nix { inherit opencode; };
+        ci = pkgs.symlinkJoin {
+          name = "opencode-ci";
+          paths = ciPackages pkgs;
+        };
       });
 
       # nix develop
       devShells = forEachSystem (pkgs: {
         default = pkgs.mkShell {
-          packages = [
-            (pkgs.symlinkJoin {
-              name = "bun-development";
-              paths = [ pkgs.bun ];
-              nativeBuildInputs = [ pkgs.makeWrapper ];
-              postBuild = lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
-                wrapProgram $out/bin/bun \
-                  --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [ pkgs.stdenv.cc.cc ]}
-                ln -sfn bun $out/bin/bunx
-              '';
-            })
-            pkgs.nodejs
-            pkgs.pkg-config
-            pkgs.openssl
-            pkgs.git
-            pkgs.bun2nix
-            pkgs.ffmpeg
-          ];
+          packages = ciPackages pkgs;
         };
       });
 
