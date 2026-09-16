@@ -58,14 +58,23 @@ describe("one built-in cannot build an unbounded value", () => {
 
   test("promises: too many pending at once, while settled ones do not count", async () => {
     const n = MAX_PENDING_PROMISES
+    const t0 = performance.now()
     expect(await value(`for (let i = 0; i < ${n * 2}; i++) Promise.resolve(i); return 1`)).toBe(1)
+    const t1 = performance.now()
+    console.log(`resolved ${n * 2} promises in ${(t1 - t0).toFixed(0)}ms`)
+    const t2 = performance.now()
     expect(
       await failure(
         `try { for (let i = 0; i <= ${n}; i++) new Promise(() => {}) } catch (e) { throw Error(e.name + ": " + e.message) }`,
       ),
     ).toContain("RangeError: Too many pending promises")
+    const t3 = performance.now()
+    console.log(`pending promise limit (loop) in ${(t3 - t2).toFixed(0)}ms`)
+    const t4 = performance.now()
     expect(await failure(`await Promise.all(Array(${n + 1}).fill(0).map(() => new Promise(() => {})))`)).toContain(
       "Too many pending promises",
     )
+    const t5 = performance.now()
+    console.log(`pending promise limit (Promise.all) in ${(t5 - t4).toFixed(0)}ms`)
   })
 })
