@@ -5,7 +5,7 @@ description: >
 
 inputs:
   secret:
-    description: The secret value to test (pass via ${{ secrets.NAME }})
+    description: The secret value to test
     required: true
 
 outputs:
