@@ -94,7 +94,7 @@ runs:
       if: runner.os == 'Linux'
       shell: bash
       run: |
-        nix profile install ".#devShells.$(nix eval --raw --expr builtins.currentSystem).default" \
+        nix profile install ".#devShells.$(nix eval --impure --raw --expr builtins.currentSystem).default" \
           --accept-flake-config --profile "$RUNNER_TEMP/devshell" -L
         echo "$RUNNER_TEMP/devshell/bin" >> "$GITHUB_PATH"
 
