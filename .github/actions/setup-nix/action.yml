@@ -51,7 +51,7 @@ inputs:
   diff-store:
     description: Diff the store before and after the cache action runs
     required: false
-    default: false
+    default: "false"
 
   # cachix-action
   cachix-auth-token:
