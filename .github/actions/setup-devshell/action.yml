@@ -90,12 +90,12 @@ runs:
       with:
         cachix-auth-token: ${{ inputs.cachix-auth-token }}
 
-    - name: Install devShell
+    - name: Build devShell
       if: runner.os == 'Linux'
       shell: bash
       run: |
-        nix profile install ".#devShells.$(nix eval --impure --raw --expr builtins.currentSystem).default" \
-          --accept-flake-config --profile "$RUNNER_TEMP/devshell" -L
+        nix build ".#devShells.$(nix eval --impure --raw --expr builtins.currentSystem).default" \
+          --accept-flake-config --no-link --out-link "$RUNNER_TEMP/devshell" -L
         echo "$RUNNER_TEMP/devshell/bin" >> "$GITHUB_PATH"
 
     - name: Configure npm registry (Linux)

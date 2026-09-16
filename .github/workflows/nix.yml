@@ -89,7 +89,5 @@ jobs:
         if: matrix.system != 'aarch64-darwin'
         run: nix profile install .#packages.${{ matrix.system }}.opencode-desktop --accept-flake-config -L
 
-      - name: Install devShell
-        run: |
-          nix profile install .#devShells.${{ matrix.system }}.default \
-            --accept-flake-config --profile "$RUNNER_TEMP/devshell" -L
+      - name: Build devShell
+        run: nix build .#devShells.${{ matrix.system }}.default --accept-flake-config --no-link -L
