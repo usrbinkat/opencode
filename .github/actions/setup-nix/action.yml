@@ -100,18 +100,14 @@ runs:
         github_access_token: ${{ inputs.github-access-token }}
         enable_kvm: ${{ inputs.enable-kvm }}
 
-    # magic-nix-cache-action v15 action.yml declares diff-store with
-    # default: false (YAML boolean). The runner stringifies YAML boolean
-    # false to empty string for the post step's INPUT_DIFF-STORE env var.
-    # getBooleanInput rejects empty string. Export the correct string value
-    # via GITHUB_ENV so it persists to the post step.
-    - name: Set diff-store input for magic-nix-cache post step
-      shell: bash
-      run: echo "INPUT_DIFF-STORE=${{ inputs.diff-store }}" >> "$GITHUB_ENV"
-
     # GHA cache has a 10 GB limit; Cachix is the durable binary cache.
+    # env INPUT_DIFF-STORE overrides the action's own default: false
+    # (YAML boolean) which the runner stringifies to empty string in
+    # the post step, crashing getBooleanInput.
     - name: Enable GHA Nix cache
       uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7 # v15
+      env:
+        INPUT_DIFF-STORE: ${{ inputs.diff-store }}
       with:
         use-flakehub: ${{ inputs.use-flakehub }}
         use-gha-cache: ${{ inputs.use-gha-cache }}
