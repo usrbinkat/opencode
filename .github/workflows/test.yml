@@ -21,7 +21,7 @@ env:
 
 jobs:
   affected:
-    name: affected packages
+    name: app change detection
     runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
     outputs:
       app: ${{ steps.packages.outputs.app }}
@@ -47,7 +47,7 @@ jobs:
           bun -e 'const result = await Bun.file("affected.json").json(); console.log(`app=${result.packages.count > 0}`)' >> "$GITHUB_OUTPUT"
 
   unit:
-    name: unit (${{ matrix.settings.name }})
+    name: build and test ${{ matrix.settings.name }}
     strategy:
       fail-fast: false
       matrix:
@@ -152,7 +152,7 @@ jobs:
         run: bun run check:generated
 
   e2e:
-    name: e2e (${{ matrix.settings.name }})
+    name: end-to-end browser test ${{ matrix.settings.name }}
     needs: affected
     strategy:
       fail-fast: false
