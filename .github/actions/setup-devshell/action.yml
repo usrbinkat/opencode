@@ -94,8 +94,10 @@ runs:
       if: runner.os == 'Linux'
       shell: bash
       run: |
-        nix build .#ci --accept-flake-config --out-link "$RUNNER_TEMP/ci-env" -L
-        echo "$(readlink -f "$RUNNER_TEMP/ci-env")/bin" >> "$GITHUB_PATH"
+        nix profile install .#ci --accept-flake-config --profile "$RUNNER_TEMP/ci-env" -L
+        echo "$RUNNER_TEMP/ci-env/bin" >> "$GITHUB_PATH"
+        test -x "$RUNNER_TEMP/ci-env/bin/bun" || { echo "::error::bun not found in CI toolchain profile"; exit 1; }
+        test -x "$RUNNER_TEMP/ci-env/bin/node" || { echo "::error::node not found in CI toolchain profile"; exit 1; }
 
     - name: Configure npm registry (Linux)
       if: runner.os == 'Linux' && inputs.npm-publish == 'true'
