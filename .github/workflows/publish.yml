@@ -105,11 +105,11 @@ jobs:
           secret: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
   # ──────────────────────────────────────────────────────────────────────
-  # Version: compute version, optionally deploy update service
+  # Version: compute version string from package metadata.
+  # No credentials required — runs on every push including forks.
   # ──────────────────────────────────────────────────────────────────────
   version:
     needs: credentials
-    if: needs.credentials.outputs.has-github-app == 'true'
     runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
     timeout-minutes: 15
     steps:
@@ -119,32 +119,11 @@ jobs:
 
       - uses: ./.github/actions/setup-devshell
 
-      - name: Deploy update service
-        if: github.ref_name == 'v2' && needs.credentials.outputs.has-cloudflare == 'true'
-        working-directory: services/update
-        run: bun run deploy
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-
-      - name: Setup git committer
-        id: committer
-        uses: ./.github/actions/setup-git-committer
-        with:
-          opencode-app-id: ${{ vars.OPENCODE_APP_ID }}
-          opencode-app-secret: ${{ secrets.OPENCODE_APP_SECRET }}
-
-      - name: Install OpenCode
-        if: inputs.bump || inputs.version
-        run: bun i -g opencode-ai
-
       - id: version
-        run: |
-          ./script/version.ts
+        run: ./script/version.ts
         env:
-          GH_TOKEN: ${{ steps.committer.outputs.token }}
           OPENCODE_BUMP: ${{ inputs.bump }}
           OPENCODE_VERSION: ${{ inputs.version }}
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           GH_REPO: ${{ (github.ref_name == 'beta' && format('{0}-beta', github.repository)) || github.repository }}
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -153,11 +132,11 @@ jobs:
       repo: ${{ steps.version.outputs.repo }}
 
   # ──────────────────────────────────────────────────────────────────────
-  # Build CLI: compile Bun binaries for all platforms
+  # Build CLI: compile Bun binaries for all platforms.
+  # No credentials required — runs on every push including forks.
   # ──────────────────────────────────────────────────────────────────────
   build-cli:
     needs: [credentials, version]
-    if: needs.credentials.outputs.has-github-app == 'true'
     runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
     timeout-minutes: 30
     steps:
@@ -167,13 +146,6 @@ jobs:
 
       - uses: ./.github/actions/setup-devshell
 
-      - name: Setup git committer
-        id: committer
-        uses: ./.github/actions/setup-git-committer
-        with:
-          opencode-app-id: ${{ vars.OPENCODE_APP_ID }}
-          opencode-app-secret: ${{ secrets.OPENCODE_APP_SECRET }}
-
       - name: Build legacy CLI
         if: github.ref_name != 'v2' && github.ref_name != 'beta'
         run: ./packages/opencode/script/build.ts ${{ (github.ref_name == 'beta' && '--sourcemaps') || '' }}
@@ -181,7 +153,7 @@ jobs:
           OPENCODE_VERSION: ${{ needs.version.outputs.version }}
           OPENCODE_RELEASE: ${{ needs.version.outputs.release }}
           GH_REPO: ${{ needs.version.outputs.repo }}
-          GH_TOKEN: ${{ steps.committer.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
 
       - name: Build preview CLI
         id: build
@@ -191,7 +163,7 @@ jobs:
           OPENCODE_VERSION: ${{ needs.version.outputs.version }}
           OPENCODE_RELEASE: ${{ needs.version.outputs.release }}
           GH_REPO: ${{ needs.version.outputs.repo }}
-          GH_TOKEN: ${{ steps.committer.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
 
       - uses: ./.github/actions/upload-artifact
         if: github.ref_name != 'v2' && github.ref_name != 'beta'
@@ -273,11 +245,12 @@ jobs:
           if-no-files-found: error
 
   # ──────────────────────────────────────────────────────────────────────
-  # Build Node app archive
+  # Build Node app archive.
+  # No credentials required — runs on every push including forks.
   # ──────────────────────────────────────────────────────────────────────
   build-node-app-archive:
     needs: [credentials, version]
-    if: needs.credentials.outputs.has-github-app == 'true' && !(github.ref_name == 'v2' && (inputs.bump || inputs.version))
+    if: "!(github.ref_name == 'v2' && (inputs.bump || inputs.version))"
     runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
     timeout-minutes: 30
     steps:
@@ -298,14 +271,15 @@ jobs:
           if-no-files-found: error
 
   # ──────────────────────────────────────────────────────────────────────
-  # Build Node CLI: SEA binaries per platform
+  # Build Node CLI: SEA binaries per platform.
+  # No credentials required — runs on every push including forks.
   # ──────────────────────────────────────────────────────────────────────
   build-node-cli:
     needs:
       - credentials
       - version
       - build-node-app-archive
-    if: needs.credentials.outputs.has-github-app == 'true' && !(github.ref_name == 'v2' && (inputs.bump || inputs.version))
+    if: "!(github.ref_name == 'v2' && (inputs.bump || inputs.version))"
     strategy:
       fail-fast: false
       matrix:
@@ -356,12 +330,14 @@ jobs:
           if-no-files-found: error
 
   # ──────────────────────────────────────────────────────────────────────
-  # Sign CLI Windows: Azure Trusted Signing
+  # Sign CLI Windows: Azure Trusted Signing.
+  # Depends on build-cli (not sign-cli-macos) so unsigned builds still
+  # produce artifacts on forks where macOS signing skips.
   # ──────────────────────────────────────────────────────────────────────
   sign-cli-windows:
     needs:
       - credentials
-      - sign-cli-macos
+      - build-cli
     runs-on: ${{ vars.RUNNER_WINDOWS || 'windows-2025' }}
     timeout-minutes: 15
     if: needs.credentials.outputs.has-azure-signing == 'true' && (github.ref_name == 'v2' || github.ref_name == 'beta')
@@ -375,9 +351,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # On the upstream org, macOS signing runs first and produces the merged
+      # cli artifact. On forks, use the unsigned artifact directly.
       - uses: ./.github/actions/download-artifact
         with:
-          name: opencode-preview-cli-macos
+          name: ${{ needs.credentials.outputs.has-apple-signing == 'true' && 'opencode-preview-cli-macos' || 'opencode-preview-cli-unsigned' }}
           path: packages/cli/dist
 
       - uses: ./.github/actions/setup-azure-signing
@@ -416,16 +394,15 @@ jobs:
           if-no-files-found: error
 
   # ──────────────────────────────────────────────────────────────────────
-  # Build Electron: desktop app for all 6 platform targets
+  # Build Electron: desktop app for all 6 platform targets.
+  # Builds run on every push; signing steps are gated per-step.
   # ──────────────────────────────────────────────────────────────────────
   build-electron:
     needs:
       - credentials
       - version
-      - sign-cli-windows
-    if: >-
-      needs.credentials.outputs.has-github-app == 'true' &&
-      (github.ref_name != 'v2' || needs.version.outputs.release != '')
+      - build-cli
+    if: github.ref_name != 'v2' || needs.version.outputs.release != ''
     continue-on-error: false
     env:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
@@ -464,7 +441,7 @@ jobs:
 
       - uses: ./.github/actions/download-artifact
         with:
-          name: opencode-preview-cli
+          name: opencode-preview-cli-unsigned
           path: packages/cli/dist
 
       - uses: ./.github/actions/setup-apple-signing
@@ -498,6 +475,7 @@ jobs:
 
       - name: Setup git committer
         id: committer
+        if: needs.credentials.outputs.has-github-app == 'true'
         uses: ./.github/actions/setup-git-committer
         with:
           opencode-app-id: ${{ vars.OPENCODE_APP_ID }}
@@ -530,7 +508,7 @@ jobs:
           OPENCODE_CLI_DIST: ${{ github.workspace }}/packages/cli/dist
 
       - name: Package
-        if: needs.version.outputs.release
+        if: needs.version.outputs.release && needs.credentials.outputs.has-github-app == 'true'
         run: npx electron-builder ${{ matrix.settings.platform_flag }} --publish never --config electron-builder.config.ts
         working-directory: packages/desktop
         timeout-minutes: 60
@@ -543,7 +521,7 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
 
       - name: Package (no publish)
-        if: ${{ !needs.version.outputs.release }}
+        if: ${{ !needs.version.outputs.release || needs.credentials.outputs.has-github-app != 'true' }}
         run: npx electron-builder ${{ matrix.settings.platform_flag }} --publish never --config electron-builder.config.ts
         working-directory: packages/desktop
         timeout-minutes: 60
@@ -599,7 +577,8 @@ jobs:
           path: packages/desktop/dist/latest*.yml
 
   # ──────────────────────────────────────────────────────────────────────
-  # Publish: npm, GitHub release, AUR, containers
+  # Publish: npm, GitHub release, AUR, containers.
+  # Gated on has-github-app — skips entirely on forks.
   # ──────────────────────────────────────────────────────────────────────
   publish:
     needs:
@@ -611,7 +590,10 @@ jobs:
       - build-node-cli
       - sign-cli-windows
       - build-electron
-    if: always() && !failure() && !cancelled()
+    if: >-
+      always() && !failure() && !cancelled() &&
+      needs.credentials.outputs.has-github-app == 'true' &&
+      github.repository_owner == 'anomalyco'
     runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
     timeout-minutes: 30
     steps:
@@ -622,6 +604,24 @@ jobs:
           npm-publish: "true"
 
       - uses: ./.github/actions/setup-docker
+
+      - name: Deploy update service
+        if: github.ref_name == 'v2' && needs.credentials.outputs.has-cloudflare == 'true'
+        working-directory: services/update
+        run: bun run deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Setup git committer
+        id: committer
+        uses: ./.github/actions/setup-git-committer
+        with:
+          opencode-app-id: ${{ vars.OPENCODE_APP_ID }}
+          opencode-app-secret: ${{ secrets.OPENCODE_APP_SECRET }}
+
+      - name: Install OpenCode
+        if: inputs.bump || inputs.version
+        run: bun i -g opencode-ai
 
       - uses: ./.github/actions/download-artifact
         if: github.ref_name != 'v2' && github.ref_name != 'beta'
@@ -666,14 +666,6 @@ jobs:
           path: /tmp/desktop
           merge-multiple: true
 
-      - name: Setup git committer
-        id: committer
-        if: needs.credentials.outputs.has-github-app == 'true'
-        uses: ./.github/actions/setup-git-committer
-        with:
-          opencode-app-id: ${{ vars.OPENCODE_APP_ID }}
-          opencode-app-secret: ${{ secrets.OPENCODE_APP_SECRET }}
-
       - name: Setup apt packages (AUR)
         if: needs.credentials.outputs.has-aur == 'true'
         uses: ./.github/actions/setup-apt-cache
@@ -695,7 +687,6 @@ jobs:
           ssh-keyscan -H aur.archlinux.org >> ~/.ssh/known_hosts || true
 
       - run: ./script/publish.ts
-        if: needs.credentials.outputs.has-github-app == 'true'
         env:
           OPENCODE_VERSION: ${{ needs.version.outputs.version }}
           OPENCODE_RELEASE: ${{ needs.version.outputs.release }}
