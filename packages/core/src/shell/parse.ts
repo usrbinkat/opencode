@@ -183,55 +183,59 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/ShellParse") {}
 
+// Process-scoped parser initialization. Tree-sitter WASM allocates Language
+// grammars into a shared linear memory that grows monotonically — Language.load
+// is cumulative and irrecoverable. Parser.init is idempotent (same Module3
+// singleton). These resources must live for the process lifetime; scoping them
+// to an Effect layer with a finalizer causes OOM when the layer rebuilds across
+// test files because each rebuild calls Language.load into the same exhaustible
+// WASM heap. A module-level promise (matching the upstream lazy(initialize)
+// pattern) ensures exactly one initialization per process.
+let processParserPromise: Promise<Parsers> | undefined
+const loadParsersOnce = Effect.gen(function* () {
+  if (!processParserPromise) {
+    const started = Date.now()
+    yield* Effect.logInfo("shell parser initialization started")
+    processParserPromise = (async () => {
+      const { Parser: ParserCtor, Language: LanguageCtor } = await import("web-tree-sitter")
+      await ParserCtor.init({ locateFile: () => resolve(shellParserWasm.runtime) })
+      const [bashLanguage, psLanguage] = await Promise.all([
+        LanguageCtor.load(resolve(shellParserWasm.bash)),
+        LanguageCtor.load(resolve(shellParserWasm.powershell)),
+      ]) as [Language, Language]
+      const bash = new ParserCtor()
+      bash.setLanguage(bashLanguage)
+      const ps = new ParserCtor()
+      ps.setLanguage(psLanguage)
+      return { bash, ps } as Parsers
+    })()
+    try {
+      const parsers = yield* Effect.tryPromise({
+        try: () => processParserPromise!,
+        catch: (cause) =>
+          new InitializationError({ message: "Failed to initialize shell parser", cause: cause as Error }),
+      })
+      yield* Effect.logInfo("shell parser initialization completed", { durationMs: Date.now() - started })
+      return parsers
+    } catch (error) {
+      processParserPromise = undefined
+      throw error
+    }
+  }
+  return yield* Effect.tryPromise({
+    try: () => processParserPromise!,
+    catch: (cause) =>
+      new InitializationError({ message: "Failed to initialize shell parser", cause: cause as Error }),
+  })
+}).pipe(Effect.withSpan("ShellParse.initialize"))
+
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
-    const loadParsers = yield* Effect.cached(
-      Effect.gen(function* () {
-        const started = Date.now()
-        yield* Effect.logInfo("shell parser initialization started")
-        const { Parser: ParserCtor, Language: LanguageCtor } = yield* Effect.tryPromise({
-          try: () => import("web-tree-sitter"),
-          catch: (cause) =>
-            new InitializationError({ message: "Failed to import web-tree-sitter", cause: cause as Error }),
-        })
-        yield* Effect.tryPromise({
-          try: () => ParserCtor.init({ locateFile: () => resolve(shellParserWasm.runtime) }),
-          catch: (cause) =>
-            new InitializationError({ message: "Failed to initialize tree-sitter WASM runtime", cause: cause as Error }),
-        })
-        const [bashLanguage, psLanguage] = yield* Effect.tryPromise({
-          try: () =>
-            Promise.all([
-              LanguageCtor.load(resolve(shellParserWasm.bash)),
-              LanguageCtor.load(resolve(shellParserWasm.powershell)),
-            ]) as Promise<[Language, Language]>,
-          catch: (cause) =>
-            new InitializationError({ message: "Failed to load tree-sitter language grammars", cause: cause as Error }),
-        })
-        const bash = new ParserCtor()
-        bash.setLanguage(bashLanguage)
-        const ps = new ParserCtor()
-        ps.setLanguage(psLanguage)
-        yield* Effect.logInfo("shell parser initialization completed", { durationMs: Date.now() - started })
-        return { bash, ps } as Parsers
-      }).pipe(Effect.withSpan("ShellParse.initialize")),
-    )
     // Pre-warm: trigger initialization at layer build so the first scan call
-    // does not pay the WASM cold-start cost. Errors are cached and surfaced on
-    // scan, matching the photon.ts pattern for unavailable runtimes.
-    yield* loadParsers.pipe(Effect.ignore)
-    yield* Effect.addFinalizer(() =>
-      loadParsers.pipe(
-        Effect.tap((parsers) =>
-          Effect.sync(() => {
-            parsers.bash.delete()
-            parsers.ps.delete()
-          }),
-        ),
-        Effect.ignore,
-      ),
-    )
+    // does not pay the WASM cold-start cost. Errors are surfaced on scan,
+    // matching the photon.ts pattern for unavailable runtimes.
+    yield* loadParsersOnce.pipe(Effect.ignore)
 
     const scanMethod = Effect.fnUntraced(function* (
       command: string,
@@ -240,7 +244,7 @@ const layer = Layer.effect(
       options?: { portable?: boolean },
     ) {
       if (options?.portable) return yield* scanPortableImpl(command, shell, cwd)
-      const parsers = yield* loadParsers
+      const parsers = yield* loadParsersOnce
       return yield* scanLegacyWith(parsers, command, shell, cwd)
     })
 
