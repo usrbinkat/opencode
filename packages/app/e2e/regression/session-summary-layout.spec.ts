@@ -38,6 +38,9 @@ for (const direction of ["ltr", "rtl"] as const) {
     await testInfo.attach(`summary-${direction}-centered`, { body: await page.screenshot(), contentType: "image/png" })
     await trigger.click()
     await expect(content).toHaveAttribute("data-summary-motion", "transitionrun,transitionend,")
+    // Read instrumentation after assertion settles for diagnostics on future failures
+    const postAssertLog = await page.evaluate(() => (window as any).__transitionLog ?? [])
+    console.log(`summary-${direction} transition log:`, JSON.stringify(postAssertLog, null, 2))
     await expect
       .poll(async () => {
         const message = await row.boundingBox()
