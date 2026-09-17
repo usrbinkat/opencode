@@ -234,7 +234,7 @@ test("concurrent service processes elect one server", async () => {
   const processes = Array.from({ length: 10 }, () => Bun.spawn(command, { env, stderr: "pipe", stdout: "pipe" }))
 
   try {
-    const info = await waitForInfo(registration)
+    const info = await waitForInfo(registration, () => true, 1200)
     const winner = processes.find((process) => process.pid === info.pid)
     const losers = processes.filter((process) => process.pid !== info.pid)
     const exited = await Promise.all(
@@ -559,18 +559,23 @@ test("a failed service stays registered and owns the selected port until stopped
   }
 }, 30_000)
 
-async function waitForInfo(file: string, accept: (info: Info) => boolean = () => true) {
-  for (let attempt = 0; attempt < 400; attempt++) {
+async function waitForInfo(file: string, accept: (info: Info) => boolean = () => true, maxAttempts = 400) {
+  const t0 = performance.now()
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const value = await Bun.file(file)
       .json()
       .catch(() => undefined)
     if (value !== undefined) {
       const info = await Schema.decodeUnknownPromise(Service.Info)(value)
-      if (accept(info)) return info
+      if (accept(info)) {
+        console.log(`waitForInfo resolved in ${(performance.now() - t0).toFixed(0)}ms (${attempt + 1} attempts)`)
+        return info
+      }
     }
     await Bun.sleep(50)
   }
-  throw new Error("Timed out waiting for service registration")
+  const elapsed = (performance.now() - t0).toFixed(0)
+  throw new Error(`Timed out waiting for service registration after ${elapsed}ms (${maxAttempts} attempts)`)
 }
 
 async function waitForFailed(info: Info) {

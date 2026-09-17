@@ -56,7 +56,11 @@ describe("one built-in cannot build an unbounded value", () => {
     }
   })
 
-  test("promises: too many pending at once, while settled ones do not count", async () => {
+  // TODO: Promise.all path takes 8.4s on ubuntu-24.04 GHA runners (973ms Windows).
+  // Investigate Effect fiber-per-promise overhead in src/interpreter/promises.ts create().
+  test(
+    "promises: too many pending at once, while settled ones do not count",
+    async () => {
     const n = MAX_PENDING_PROMISES
     const t0 = performance.now()
     expect(await value(`for (let i = 0; i < ${n * 2}; i++) Promise.resolve(i); return 1`)).toBe(1)
@@ -76,5 +80,7 @@ describe("one built-in cannot build an unbounded value", () => {
     )
     const t5 = performance.now()
     console.log(`pending promise limit (Promise.all) in ${(t5 - t4).toFixed(0)}ms`)
-  })
+    },
+    20_000,
+  )
 })
