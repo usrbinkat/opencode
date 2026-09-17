@@ -88,6 +88,7 @@ test("clears the terminal line with Command+Delete", async ({ page }) => {
   await page.keyboard.press("Control+Backquote")
   await expect(terminal.locator("textarea")).toHaveCount(1)
   await expect.poll(() => sendPtyOutput).toBeDefined()
+  await expect.poll(() => terminal.evaluate((el) => el.contains(document.activeElement)), { timeout: 10_000 }).toBe(true)
 
   await page.keyboard.press(process.platform === "darwin" ? "Meta+Backspace" : "Control+u")
 
@@ -140,7 +141,7 @@ test("routes typing to the composer unless the open terminal is focused", async 
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
   await page.keyboard.type("a")
 
-  await expect(composer).toBeFocused()
+  await expect.poll(() => composer.evaluate((el) => document.activeElement === el), { timeout: 10_000 }).toBe(true)
   await expect(composer).toHaveText("a")
 })
 

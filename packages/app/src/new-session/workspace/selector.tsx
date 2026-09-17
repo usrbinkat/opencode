@@ -30,6 +30,7 @@ export function PromptWorkspaceSelector(props: {
   const [search, setSearch] = createStore({ workspaces: "", branches: "" })
   let searchInput: HTMLInputElement | undefined
   let branchSearchInput: HTMLInputElement | undefined
+  let branchTriggerRef: HTMLButtonElement | undefined
   let focusSearch = false
   const branchTruncation = createTruncatedText()
   const focusWorktreeSearch = () =>
@@ -279,6 +280,7 @@ export function PromptWorkspaceSelector(props: {
         >
           <Menu placement={placement()} gutter={4} modal={summary() ? false : undefined} onOpenChange={onOpenChange}>
             <Menu.Trigger
+              ref={branchTriggerRef}
               class={
                 summary()
                   ? "session-summary-row"
@@ -304,6 +306,13 @@ export function PromptWorkspaceSelector(props: {
                   event.preventDefault()
                   // Kobalte defers its list autofocus until after the focus scope opens.
                   setTimeout(() => requestAnimationFrame(() => branchSearchInput?.focus({ preventScroll: true })))
+                }}
+                onCloseAutoFocus={(event) => {
+                  // Kobalte's focus-scope restoration is deferred and unreliable in
+                  // headless environments where the browser window lacks OS focus.
+                  // Explicitly return focus to the trigger for keyboard navigation.
+                  event.preventDefault()
+                  branchTriggerRef?.focus()
                 }}
               >
                 <div class="flex h-7 shrink-0 items-center gap-2 rounded-sm pl-3 pr-2.5 text-v2-icon-icon-muted">

@@ -197,11 +197,16 @@ export function PromptProjectSelector(props: {
 }) {
   const [triggerReady, setTriggerReady] = createSignal(false)
   let contentRef: HTMLDivElement | undefined
-  const dismiss = createMenuDismissController(() => contentRef)
+  let triggerRef: HTMLButtonElement | undefined
+  const dismiss = createMenuDismissController(
+    () => contentRef,
+    () => triggerRef,
+  )
   let triggerFrame: number | undefined
 
   // Floating UI requires a connected anchor; route transitions can construct this trigger before adoption.
   const setTriggerRef = (element: HTMLButtonElement) => {
+    triggerRef = element
     const ready = () => {
       if (!element.isConnected) {
         triggerFrame = requestAnimationFrame(ready)

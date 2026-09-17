@@ -588,22 +588,19 @@ async function pointAtTimeline(page: Page) {
 }
 
 async function scrollTimelineUp(page: Page, before: SmokeState) {
+  // Use Playwright's mouse.wheel for a real browser scroll event. Synthetic
+  // WheelEvents dispatched via dispatchEvent do not cause native scrolling.
+  // Direct scrollTop writes inside evaluate fight the virtualizer's scroll
+  // anchoring (shouldAdjustScrollPositionOnItemSizeChange) when prepended
+  // history items resize, preventing the position from converging to the top.
+  await page.mouse.wheel(0, -300)
+
+  // Wait for the virtualizer to settle after the real scroll: the timeline
+  // signature must differ from the previous state and remain stable for two
+  // consecutive animation frames.
   return page.evaluate(
     (prev) =>
       new Promise<boolean>((resolve) => {
-        const scroller = [...document.querySelectorAll<HTMLElement>(".scroll-view__viewport")].find((el) =>
-          el.querySelector("[data-timeline-row], [data-session-title]"),
-        )
-        if (!scroller) {
-          resolve(false)
-          return
-        }
-
-        scroller.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -1, deltaMode: 0 }))
-        // TODO: re-evaluate step size on higher-performance runners; 0.45 skips
-        // intermediate virtual list items on ubuntu-24.04 and windows-2025 GHA runners
-        scroller.scrollTop = Math.max(0, scroller.scrollTop - Math.max(80, Math.round(scroller.clientHeight * 0.2)))
-
         const read = () => (window as SmokeWindow).__timelineSmokeState?.().signature ?? ""
         let frames = 0
         let stableFrames = 0
@@ -622,7 +619,7 @@ async function scrollTimelineUp(page: Page, before: SmokeState) {
             return
           }
           frames++
-          if (frames >= 30) {
+          if (frames >= 60) {
             resolve(changed)
             return
           }
