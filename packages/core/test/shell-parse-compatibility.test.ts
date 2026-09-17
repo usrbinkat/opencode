@@ -58,15 +58,20 @@ describe("portable shell parser compatibility", () => {
                 process.execPath,
                 "--eval",
                 `
-            import { Effect } from "effect"
+            import { Effect, Layer, Logger, ManagedRuntime } from "effect"
             import { ShellParse } from "./src/shell/parse.ts"
             try {
               const command = ${JSON.stringify(command)}
               const shell = ${JSON.stringify(shell)}
-              const run = (effect) => Effect.runPromise(effect.pipe(Effect.provide(ShellParse.layer)))
-              const legacy = await run(ShellParse.scan(command, shell, "/workspace"))
-              const portable = await run(ShellParse.scan(command, shell, "/workspace", { portable: true }))
-              const native = await run(ShellParse.scanPortable(command, shell, "/workspace"))
+              // Redirect Effect logs to stderr so they don't contaminate JSON stdout.
+              // Share one ManagedRuntime across all scans — one WASM init per process.
+              const runtime = ManagedRuntime.make(
+                ShellParse.layer.pipe(Layer.provide(Layer.succeed(Logger.LogToStderr, true)))
+              )
+              const legacy = await runtime.runPromise(ShellParse.scan(command, shell, "/workspace"))
+              const portable = await runtime.runPromise(ShellParse.scan(command, shell, "/workspace", { portable: true }))
+              const native = await runtime.runPromise(ShellParse.scanPortable(command, shell, "/workspace"))
+              await runtime.dispose()
               console.log(JSON.stringify([legacy, portable, native]))
             } catch (e) {
               console.error(e instanceof Error ? e.stack ?? e.message : String(e))
