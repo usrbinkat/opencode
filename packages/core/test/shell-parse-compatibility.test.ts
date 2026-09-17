@@ -1,9 +1,12 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect } from "bun:test"
 import { Effect } from "effect"
 import { ShellParse } from "../src/shell/parse.js"
+import { testEffect } from "./lib/effect"
+
+const it = testEffect(ShellParse.layer)
 
 describe("portable shell parser compatibility", () => {
-  test.each([
+  for (const [shell, command, env] of [
     ["bash", "echo $((1+1))", {}],
     ["bash", "echo $((1 + $(printf hidden)))", {}],
     ["bash", "cd ~/project", {}],
@@ -42,64 +45,82 @@ describe("portable shell parser compatibility", () => {
     ["pwsh", "Set-Location $HOME; Set-Location $PWD; Set-Location $target", { HOME: "/session-home" }],
     ["pwsh", "Set-Item Env:T /outside; Set-Location $env:T", { T: "/workspace" }],
     ["pwsh", "sl /outside; Microsoft.PowerShell.Management\\Set-Location /outside", {}],
-  ] as const)(
-    "matches supported legacy resources, saved prefixes, and directories natively: %s %s %j",
-    async (shell, command, env) => {
-      if (Object.keys(env).length > 0) {
-        const child = Bun.spawn({
-          cmd: [
-            process.execPath,
-            "--eval",
-            `
-          import { Effect } from "effect"
-          import { ShellParse } from "./src/shell/parse.ts"
-          const command = ${JSON.stringify(command)}
-          const shell = ${JSON.stringify(shell)}
-          const legacy = await Effect.runPromise(ShellParse.scan(command, shell, "/workspace"))
-          const portable = await Effect.runPromise(ShellParse.scan(command, shell, "/workspace", { portable: true }))
-          const native = await Effect.runPromise(ShellParse.scanPortable(command, shell, "/workspace"))
-          console.log(JSON.stringify([legacy, portable, native]))
-        `,
-          ],
-          cwd: `${import.meta.dir}/..`,
-          env: { ...process.env, ...env },
-          stdout: "pipe",
-          stderr: "pipe",
-        })
-        const [output, error, code] = await Promise.all([
-          new Response(child.stdout).text(),
-          new Response(child.stderr).text(),
-          child.exited,
-        ])
-        expect(code, error).toBe(0)
-        const [legacy, portable, native] = JSON.parse(output)
-        expect(portable).toEqual(legacy)
-        expect(native).toEqual(legacy)
-        return
-      }
-      const legacy = await Effect.runPromise(ShellParse.scan(command, shell, "/workspace"))
-      const portable = await Effect.runPromise(ShellParse.scan(command, shell, "/workspace", { portable: true }))
-      expect(portable).toEqual(legacy)
-      expect(await Effect.runPromise(ShellParse.scanPortable(command, shell, "/workspace"))).toEqual(legacy)
-    },
+  ] as const) {
+    if (Object.keys(env).length > 0) {
+      // Environment-dependent tests must run in a subprocess with the target env vars
+      // set at the OS level. The subprocess provides ShellParse.layer explicitly.
+      it.live(
+        `matches supported legacy resources, saved prefixes, and directories natively: ${shell} ${command} ${JSON.stringify(env)}`,
+        () =>
+          Effect.gen(function* () {
+            const child = Bun.spawn({
+              cmd: [
+                process.execPath,
+                "--eval",
+                `
+            import { Effect } from "effect"
+            import { ShellParse } from "./src/shell/parse.ts"
+            const command = ${JSON.stringify(command)}
+            const shell = ${JSON.stringify(shell)}
+            const run = (effect) => Effect.runPromise(effect.pipe(Effect.provide(ShellParse.layer)))
+            const legacy = await run(ShellParse.scan(command, shell, "/workspace"))
+            const portable = await run(ShellParse.scan(command, shell, "/workspace", { portable: true }))
+            const native = await run(ShellParse.scanPortable(command, shell, "/workspace"))
+            console.log(JSON.stringify([legacy, portable, native]))
+          `,
+              ],
+              cwd: `${import.meta.dir}/..`,
+              env: { ...process.env, ...env },
+              stdout: "pipe",
+              stderr: "pipe",
+            })
+            const [output, error, code] = yield* Effect.promise(() =>
+              Promise.all([
+                new Response(child.stdout).text(),
+                new Response(child.stderr).text(),
+                child.exited,
+              ]),
+            )
+            expect(code, error).toBe(0)
+            const [legacy, portable, native] = JSON.parse(output)
+            expect(portable).toEqual(legacy)
+            expect(native).toEqual(legacy)
+          }),
+      )
+    } else {
+      it.effect(
+        `matches supported legacy resources, saved prefixes, and directories natively: ${shell} ${command} {}`,
+        () =>
+          Effect.gen(function* () {
+            const legacy = yield* ShellParse.scan(command, shell, "/workspace")
+            const portable = yield* ShellParse.scan(command, shell, "/workspace", { portable: true })
+            expect(portable).toEqual(legacy)
+            expect(yield* ShellParse.scanPortable(command, shell, "/workspace")).toEqual(legacy)
+          }),
+      )
+    }
+  }
+
+  it.effect("derives the legacy prefix for long argument lists", () =>
+    Effect.gen(function* () {
+      const command = `echo ${"x ".repeat(16_000)}`.trimEnd()
+      const result = yield* ShellParse.scan(command, "bash", "/workspace", { portable: true })
+      expect(result).toEqual({ commands: [{ resource: command, save: "echo *" }], directories: [] })
+    }),
   )
 
-  test("derives the legacy prefix for long argument lists", async () => {
-    const command = `echo ${"x ".repeat(16_000)}`.trimEnd()
-    const result = await Effect.runPromise(ShellParse.scan(command, "bash", "/workspace", { portable: true }))
-    expect(result).toEqual({ commands: [{ resource: command, save: "echo *" }], directories: [] })
-  })
-
-  test("extracts inline PowerShell directory flags with case-insensitive names and quoted values", async () => {
-    const result = await Effect.runPromise(
-      ShellParse.scanPortable(
-        "Set-Location -LITERALPATH:C:\\outside; Set-Location -pAtH:'../other dir'",
-        "pwsh",
-        "/workspace",
-      ),
-    )
-    expect(result).toEqual({ commands: [], directories: ["C:\\outside", "../other dir"] })
-  })
+  it.effect(
+    "extracts inline PowerShell directory flags with case-insensitive names and quoted values",
+    () =>
+      Effect.gen(function* () {
+        const result = yield* ShellParse.scanPortable(
+          "Set-Location -LITERALPATH:C:\\outside; Set-Location -pAtH:'../other dir'",
+          "pwsh",
+          "/workspace",
+        )
+        expect(result).toEqual({ commands: [], directories: ["C:\\outside", "../other dir"] })
+      }),
+  )
 })
 
 describe("current native and legacy parity gaps", () => {
@@ -200,35 +221,35 @@ describe("current native and legacy parity gaps", () => {
       native: { commands: [], directories: ["a,b"] },
     },
   ]) {
-    test(fixture.name, async () => {
-      const native = await Effect.runPromise(ShellParse.scanPortable(fixture.command, fixture.shell, "/workspace"))
-      expect(native).toEqual(fixture.native)
-      expect(await Effect.runPromise(ShellParse.scan(fixture.command, fixture.shell, "/workspace"))).toEqual(
-        fixture.legacy,
-      )
-      expect(
-        await Effect.runPromise(ShellParse.scan(fixture.command, fixture.shell, "/workspace", { portable: true })),
-      ).toEqual(native)
-      expect(native).not.toEqual(fixture.legacy)
-    })
+    it.effect(fixture.name, () =>
+      Effect.gen(function* () {
+        const native = yield* ShellParse.scanPortable(fixture.command, fixture.shell, "/workspace")
+        expect(native).toEqual(fixture.native)
+        expect(yield* ShellParse.scan(fixture.command, fixture.shell, "/workspace")).toEqual(fixture.legacy)
+        expect(yield* ShellParse.scan(fixture.command, fixture.shell, "/workspace", { portable: true })).toEqual(native)
+        expect(native).not.toEqual(fixture.legacy)
+      }),
+    )
   }
 })
 
 describe("legacy directory command behavior", () => {
-  test.each(["bash", "zsh", "pwsh"])("retains the original shared directory command set: %s", async (shell) => {
-    const result = await Effect.runPromise(
-      ShellParse.scan(
-        "chdir /outside; set-location /elsewhere; push-location /stack; sl .; pop-location",
-        shell,
-        "/workspace",
-      ),
+  for (const shell of ["bash", "zsh", "pwsh"]) {
+    it.effect(`retains the original shared directory command set: ${shell}`, () =>
+      Effect.gen(function* () {
+        const result = yield* ShellParse.scan(
+          "chdir /outside; set-location /elsewhere; push-location /stack; sl .; pop-location",
+          shell,
+          "/workspace",
+        )
+        expect(result).toEqual({
+          commands: [
+            { resource: "sl .", save: "sl *" },
+            { resource: "pop-location", save: "pop-location *" },
+          ],
+          directories: ["/outside", "/elsewhere", "/stack"],
+        })
+      }),
     )
-    expect(result).toEqual({
-      commands: [
-        { resource: "sl .", save: "sl *" },
-        { resource: "pop-location", save: "pop-location *" },
-      ],
-      directories: ["/outside", "/elsewhere", "/stack"],
-    })
-  })
+  }
 })

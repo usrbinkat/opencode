@@ -33,6 +33,7 @@ import { PermissionSaved } from "@opencode/core/permission/saved"
 import { Plugin } from "@opencode/core/plugin"
 import { PluginSupervisor } from "@opencode/core/plugin/supervisor"
 import { Shell } from "@opencode/core/shell"
+import { ShellParse } from "@opencode/core/shell/parse"
 import { ShellSelect } from "@opencode/core/shell/select"
 import { ID } from "@opencode/schema/shell"
 import { ShellTool } from "@opencode/core/tool/plugin/shell"
@@ -137,6 +138,7 @@ const shellPluginSupervisor = makeLocationNode({
     Session.node,
     Job.node,
     Shell.node,
+    ShellParse.node,
     ShellSelect.node,
     Tool.node,
   ],
@@ -152,6 +154,7 @@ const nodes = LayerNode.group([
   filesystem,
   FSUtil.node,
   Global.node,
+  ShellParse.node,
 ])
 const replacements = [
   SessionExecution.node.replace(executionNode),
@@ -264,6 +267,8 @@ const runPermissionCommand = (
   replies: ReadonlyArray<Permission.Reply>,
 ) =>
   Effect.gen(function* () {
+    const started = Date.now()
+    yield* Effect.logInfo("runPermissionCommand started", { command: command.slice(0, 60) })
     const permission = yield* Permission.Service
     const bus = yield* Bus.Service
     const queue = yield* Queue.unbounded<Permission.Request>()
@@ -271,6 +276,11 @@ const runPermissionCommand = (
       Stream.runForEach((event) => Queue.offer(queue, event.data)),
       Effect.forkScoped({ startImmediately: true }),
     )
+    const executionStarted = Date.now()
+    yield* Effect.logInfo("runPermissionCommand tool execution started", {
+      command: command.slice(0, 60),
+      setupMs: executionStarted - started,
+    })
     const execution = yield* executeTool(registry, call({ command }, `call-${Permission.ID.create()}`)).pipe(
       Effect.forkScoped,
     )
@@ -284,6 +294,11 @@ const runPermissionCommand = (
       }),
     )
     const exit = yield* Fiber.await(execution)
+    yield* Effect.logInfo("runPermissionCommand completed", {
+      command: command.slice(0, 60),
+      totalMs: Date.now() - started,
+      executionMs: Date.now() - executionStarted,
+    })
     expect(yield* permission.list()).toEqual([])
     expect(yield* Queue.size(queue)).toBe(0)
     return { exit, requests }

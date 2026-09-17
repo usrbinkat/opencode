@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { Effect } from "effect"
 import { ShellParse } from "../../src/shell/parse.js"
 import { ShellScan } from "../../src/shell/scan.js"
+import { provide } from "./helpers.js"
 
 const contexts = [
   (source: string) => source,
@@ -27,10 +27,10 @@ describe("compound function acceptance", () => {
           const source = context(`${head} ${body}; ${name}`)
           test(`${shell}: ${source}`, async () => {
             // Braces preserve the function's behavior, but avoid Tree-sitter's recovery artifacts.
-            const legacy = await Effect.runPromise(
+            const legacy = await provide(
               ShellParse.scan(context(`${head} { ${body}; }; ${name}`), shell, "/workspace"),
             )
-            expect(await Effect.runPromise(ShellParse.scanPortable(source, shell, "/workspace"))).toEqual(legacy)
+            expect(await provide(ShellParse.scanPortable(source, shell, "/workspace"))).toEqual(legacy)
           })
         }
   }
@@ -79,8 +79,8 @@ describe("Zsh parenthesized loop acceptance", () => {
     for (const context of contexts) {
       const source = context(fixture.source)
       test(source, async () => {
-        const legacy = await Effect.runPromise(ShellParse.scan(context(fixture.equivalent), "zsh", "/workspace"))
-        expect(await Effect.runPromise(ShellParse.scanPortable(source, "zsh", "/workspace"))).toEqual(legacy)
+        const legacy = await provide(ShellParse.scan(context(fixture.equivalent), "zsh", "/workspace"))
+        expect(await provide(ShellParse.scanPortable(source, "zsh", "/workspace"))).toEqual(legacy)
       })
     }
 
