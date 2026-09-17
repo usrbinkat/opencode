@@ -41,7 +41,11 @@ for (const direction of ["ltr", "rtl"] as const) {
             elapsed: Math.round(performance.now() - start),
             translate: getComputedStyle(element).translate,
           })
+          // Only write transitionrun and transitionend to the attribute —
+          // transitionstart and transitioncancel are logged for diagnostics
+          // but must not alter the test's expected motion sequence.
           if (te.propertyName !== "translate") return
+          if (type !== "transitionrun" && type !== "transitionend") return
           element.setAttribute("data-summary-motion", `${element.getAttribute("data-summary-motion")}${type},`)
         })
       }
@@ -49,10 +53,10 @@ for (const direction of ["ltr", "rtl"] as const) {
     })
     await testInfo.attach(`summary-${direction}-centered`, { body: await page.screenshot(), contentType: "image/png" })
     await trigger.click()
-    // Read instrumentation before assertion for diagnostics
-    const preAssertLog = await page.evaluate(() => (window as any).__transitionLog ?? [])
-    console.log(`summary-${direction} transition log at assertion:`, JSON.stringify(preAssertLog, null, 2))
     await expect(content).toHaveAttribute("data-summary-motion", "transitionrun,transitionend,")
+    // Read instrumentation after assertion settles for diagnostics on future failures
+    const postAssertLog = await page.evaluate(() => (window as any).__transitionLog ?? [])
+    console.log(`summary-${direction} transition log:`, JSON.stringify(postAssertLog, null, 2))
     await expect
       .poll(async () => {
         const message = await row.boundingBox()

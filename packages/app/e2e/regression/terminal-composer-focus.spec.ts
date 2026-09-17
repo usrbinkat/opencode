@@ -128,7 +128,31 @@ test("clears the terminal line with Command+Delete", async ({ page }) => {
     ;(window as any).__keydownLog = log
   })
 
-  await page.keyboard.press(process.platform === "darwin" ? "Meta+Backspace" : "Control+u")
+  // On macOS, Meta+Backspace maps to \x15 via terminalKeyInput. On Linux/Windows,
+  // Control+u produces \x15 via ghostty's key encoder — but headless Chromium
+  // intercepts Control+u as a browser shortcut before DOM dispatch. Use CDP
+  // Input.dispatchKeyEvent with rawKeyDown to bypass browser shortcut interception
+  // while still exercising the same application keydown handler code path.
+  if (process.platform === "darwin") {
+    await page.keyboard.press("Meta+Backspace")
+  } else {
+    const devtools = await page.context().newCDPSession(page)
+    await devtools.send("Input.dispatchKeyEvent", {
+      type: "rawKeyDown",
+      key: "u",
+      code: "KeyU",
+      windowsVirtualKeyCode: 85,
+      modifiers: 2, // Ctrl
+    })
+    await devtools.send("Input.dispatchKeyEvent", {
+      type: "keyUp",
+      key: "u",
+      code: "KeyU",
+      windowsVirtualKeyCode: 85,
+      modifiers: 2,
+    })
+    await devtools.detach()
+  }
 
   // Read instrumentation before the assertion so we get diagnostics on failure
   const keydownLog = await page.evaluate(() => (window as any).__keydownLog ?? [])

@@ -67,21 +67,45 @@ test("selects a base branch for a new workspace", async ({ page }) => {
   // Instrument: track activeElement over time after Escape to detect focus theft
   const focusTrace = await page.evaluate(
     (buttonName) =>
-      new Promise<Array<{ ms: number; tag: string; text: string; matches: boolean }>>((resolve) => {
+      new Promise<
+        Array<{
+          ms: number
+          tag: string
+          id: string
+          className: string
+          dataSlot: string
+          role: string
+          text: string
+          matches: boolean
+        }>
+      >((resolve) => {
         const btn = [...document.querySelectorAll("button")].find((b) => b.textContent?.includes(buttonName))
-        const log: Array<{ ms: number; tag: string; text: string; matches: boolean }> = []
+        const log: Array<{
+          ms: number
+          tag: string
+          id: string
+          className: string
+          dataSlot: string
+          role: string
+          text: string
+          matches: boolean
+        }> = []
         const start = performance.now()
         const sample = () => {
           const el = document.activeElement
           log.push({
             ms: Math.round(performance.now() - start),
             tag: el?.tagName ?? "null",
+            id: el?.id ?? "",
+            className: el?.className?.slice(0, 80) ?? "",
+            dataSlot: el?.getAttribute("data-slot") ?? "",
+            role: el?.getAttribute("role") ?? "",
             text: el?.textContent?.slice(0, 40) ?? "",
             matches: el === btn,
           })
         }
         sample()
-        ;[10, 20, 50, 100, 200, 500].forEach((delay) => setTimeout(sample, delay))
+        ;[10, 20, 50, 100, 150, 200, 300, 500].forEach((delay) => setTimeout(sample, delay))
         setTimeout(() => {
           sample()
           resolve(log)

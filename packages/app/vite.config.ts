@@ -41,6 +41,6 @@ export default defineConfig({
     assetsDir: "_assets",
     target: "esnext",
     sourcemap: true,
-    chunkSizeWarningLimit: 1000,
+    chunkSizeWarningLimit: 1500,
   },
 })
