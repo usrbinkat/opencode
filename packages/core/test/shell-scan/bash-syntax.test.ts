@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test"
+import { Effect } from "effect"
 import { ShellParse } from "../../src/shell/parse.js"
 import { ShellScan } from "../../src/shell/scan.js"
-import { provide } from "./helpers.js"
+import { testEffect } from "../lib/effect"
+
+const it = testEffect(ShellParse.layer)
 
 const fixtures = [
   ["if true; then VALUE=$(scan_probe); fi", ["true", "scan_probe"]],
@@ -159,29 +162,37 @@ describe("ordinary Bash and Zsh syntax", () => {
 })
 
 describe("Bash shared heredoc delimiter grammar", () => {
-  test.each([
+  for (const source of [
     '(cat <<"E\\OF"\nhello\nE\\OF\n)',
     'cat <<"E\\$OF"\nhello\nE$OF',
     '(cat <<"E\\$OF"\nhello\nE$OF\n)',
     '(cat <<-"E\\OF"\n\thello\n\tE\\OF\n)',
-  ])("preserves heredoc permission resources and saved prefixes: %s", async (source) => {
-    const legacy = await provide(ShellParse.scan(source, "/bin/bash", "/workspace"))
-    expect(await provide(ShellParse.scanPortable(source, "/bin/bash", "/workspace"))).toEqual(legacy)
-  })
+  ]) {
+    it.effect(`preserves heredoc permission resources and saved prefixes: ${source}`, () =>
+      Effect.gen(function* () {
+        const legacy = yield* ShellParse.scan(source, "/bin/bash", "/workspace")
+        expect(yield* ShellParse.scanPortable(source, "/bin/bash", "/workspace")).toEqual(legacy)
+      }),
+    )
+  }
 
-  test.each([
+  for (const [source, names] of [
     ["cat <<< hello\nprintf done", ["cat", "printf"]],
     ["(cat <<< hello\nprintf done)", ["cat", "printf"]],
     ['printf %s "$(cat <<< hello\nprintf done)"', ["printf", "cat", "printf"]],
     ['(cat <<< "$(printf hello)"\nprintf done)', ["cat", "printf", "printf"]],
-  ] as const)("does not reinterpret the tail of a here-string operator: %s", async (source, names) => {
-    const result = ShellScan.scan(source)
-    expect(result.kind).toBe("scanned")
-    if (result.kind !== "scanned") throw new Error(result.reason)
-    expect(result.commands.map((command) => command.words[0])).toEqual([...names])
-    const legacy = await provide(ShellParse.scan(source, "/bin/bash", "/workspace"))
-    expect(await provide(ShellParse.scanPortable(source, "/bin/bash", "/workspace"))).toEqual(legacy)
-  })
+  ] as const) {
+    it.effect(`does not reinterpret the tail of a here-string operator: ${source}`, () =>
+      Effect.gen(function* () {
+        const result = ShellScan.scan(source)
+        expect(result.kind).toBe("scanned")
+        if (result.kind !== "scanned") throw new Error(result.reason)
+        expect(result.commands.map((command) => command.words[0])).toEqual([...names])
+        const legacy = yield* ShellParse.scan(source, "/bin/bash", "/workspace")
+        expect(yield* ShellParse.scanPortable(source, "/bin/bash", "/workspace")).toEqual(legacy)
+      }),
+    )
+  }
 
   test.each([
     ['<<"E\\OF"', "E\\OF", true, false],
