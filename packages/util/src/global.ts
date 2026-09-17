@@ -6,7 +6,6 @@ import { Context, Effect, Layer } from "effect"
 // The variants resolve through the `workerd` bundle condition, like the
 // native-module stubs, so no runtime sniffing happens here.
 import { roots } from "#global-roots"
-import { Flock } from "./flock.js"
 import { makeGlobalNode } from "./effect/app-node.js"
 
 const app = "opencode"
@@ -27,8 +26,6 @@ const paths = {
 }
 
 export const Path = paths
-
-Flock.setGlobal({ state })
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Global") {}
 
