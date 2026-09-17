@@ -22,6 +22,29 @@ function supportsHighlights() {
   return typeof CSS !== "undefined" && typeof CSS.highlights === "object" && CSS.highlights !== null
 }
 
+// Inject ::highlight() styles at runtime via adoptedStyleSheets. Lightning CSS
+// does not recognize ::highlight() as a valid pseudo-element and emits a build
+// warning when these rules appear in statically bundled CSS. The styles have no
+// effect until CSS.highlights has entries, which only happens when this search
+// controller is active, so runtime injection is the correct lifecycle.
+let highlightStylesInjected = false
+function ensureHighlightStyles() {
+  if (highlightStylesInjected || typeof document === "undefined") return
+  if (!supportsHighlights()) return
+  highlightStylesInjected = true
+  const sheet = new CSSStyleSheet()
+  sheet.replaceSync(`
+    ::highlight(${HIGHLIGHT_HIT}) {
+      background-color: color-mix(in srgb, var(--v2-icon-icon-accent) 28%, transparent);
+    }
+    ::highlight(${HIGHLIGHT_ACTIVE}) {
+      background-color: var(--v2-icon-icon-accent);
+      color: var(--v2-background-bg-deep);
+    }
+  `)
+  document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet]
+}
+
 function clearHighlights() {
   if (!supportsHighlights()) return
   CSS.highlights.delete(HIGHLIGHT_HIT)
@@ -73,6 +96,7 @@ function applyHighlights(
   activeOccurrence: number | undefined,
 ) {
   if (!supportsHighlights()) return
+  ensureHighlightStyles()
   const { hits, active } = collectRanges(root, query, activePartID, activeOccurrence)
   CSS.highlights.set(HIGHLIGHT_HIT, new Highlight(...hits))
   CSS.highlights.set(HIGHLIGHT_ACTIVE, new Highlight(...active))

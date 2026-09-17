@@ -26,17 +26,32 @@ for (const direction of ["ltr", "rtl"] as const) {
     const dock = await composer.boundingBox()
     expect(before).not.toBeNull()
     expect(dock).not.toBeNull()
+    // Instrument: capture ALL translate transitions from attachment time, including pre-click events
     await content.evaluate((element) => {
+      const fullLog: Array<{ type: string; property: string; elapsed: number; translate: string }> = []
+      const start = performance.now()
       element.setAttribute("data-summary-motion", "")
-      for (const type of ["transitionrun", "transitionend"]) {
+      for (const type of ["transitionrun", "transitionend", "transitioncancel", "transitionstart"]) {
         element.addEventListener(type, (event) => {
-          if (event.target !== element || (event as TransitionEvent).propertyName !== "translate") return
+          const te = event as TransitionEvent
+          if (event.target !== element) return
+          fullLog.push({
+            type,
+            property: te.propertyName,
+            elapsed: Math.round(performance.now() - start),
+            translate: getComputedStyle(element).translate,
+          })
+          if (te.propertyName !== "translate") return
           element.setAttribute("data-summary-motion", `${element.getAttribute("data-summary-motion")}${type},`)
         })
       }
+      ;(window as any).__transitionLog = fullLog
     })
     await testInfo.attach(`summary-${direction}-centered`, { body: await page.screenshot(), contentType: "image/png" })
     await trigger.click()
+    // Read instrumentation before assertion for diagnostics
+    const preAssertLog = await page.evaluate(() => (window as any).__transitionLog ?? [])
+    console.log(`summary-${direction} transition log at assertion:`, JSON.stringify(preAssertLog, null, 2))
     await expect(content).toHaveAttribute("data-summary-motion", "transitionrun,transitionend,")
     await expect
       .poll(async () => {

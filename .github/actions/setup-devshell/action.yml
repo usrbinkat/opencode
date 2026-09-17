@@ -32,6 +32,10 @@ inputs:
     description: Install the Node SEA build target version from build-node.ts
     required: false
     default: "false"
+  skip-nix:
+    description: Skip Nix and dependency setup (already configured earlier in the job)
+    required: false
+    default: "false"
   playwright:
     description: Install Playwright-compatible Node before the toolchain
     required: false
@@ -85,13 +89,13 @@ runs:
 
     # ── Linux: Nix devShell ──────────────────────────────────────────
     - name: Setup Nix
-      if: runner.os == 'Linux'
+      if: runner.os == 'Linux' && inputs.skip-nix != 'true'
       uses: ./.github/actions/setup-nix
       with:
         cachix-auth-token: ${{ inputs.cachix-auth-token }}
 
     - name: Install CI toolchain
-      if: runner.os == 'Linux'
+      if: runner.os == 'Linux' && inputs.skip-nix != 'true'
       shell: bash
       run: |
         nix profile install .#ci --accept-flake-config --profile "$RUNNER_TEMP/ci-env" -L
@@ -100,14 +104,14 @@ runs:
         test -x "$RUNNER_TEMP/ci-env/bin/node" || { echo "::error::node not found in CI toolchain profile"; exit 1; }
 
     - name: Configure npm registry (Linux)
-      if: runner.os == 'Linux' && inputs.npm-publish == 'true'
+      if: runner.os == 'Linux' && inputs.skip-nix != 'true' && inputs.npm-publish == 'true'
       shell: bash
       run: |
         npm config set registry "${{ inputs.registry-url }}"
         echo "//$(echo '${{ inputs.registry-url }}' | sed 's|https\?://||')/:_authToken=\${NODE_AUTH_TOKEN}" > "$HOME/.npmrc"
 
     - name: Install dependencies (Linux)
-      if: runner.os == 'Linux'
+      if: runner.os == 'Linux' && inputs.skip-nix != 'true'
       shell: bash
       run: bun install ${{ inputs.install-flags }}
 

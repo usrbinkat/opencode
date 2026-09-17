@@ -130,6 +130,7 @@ jobs:
         if: always()
         with:
           node-sea: "true"
+          skip-nix: "true"
 
       - name: Verify Node build
         if: always()

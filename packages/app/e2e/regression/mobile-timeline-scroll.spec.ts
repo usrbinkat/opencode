@@ -86,13 +86,35 @@ for (const device of ["Pixel 7", "iPhone 13"]) {
           const origin = await anchor.boundingBox()
           expect(origin).not.toBeNull()
           if (!origin) return
+
+          // Instrument: track scroll position adjustments during the touch drag
+          await scroller.evaluate((root) => {
+            const log: Array<{ step: number; scrollTop: number; scrollHeight: number; ms: number }> = []
+            const start = performance.now()
+            let step = 0
+            root.addEventListener("scroll", () => {
+              log.push({
+                step,
+                scrollTop: root.scrollTop,
+                scrollHeight: root.scrollHeight,
+                ms: Math.round(performance.now() - start),
+              })
+            })
+            ;(window as any).__touchScrollLog = log
+            ;(window as any).__touchScrollStep = (s: number) => { step = s }
+          })
+
           for (let step = 1; step <= 8; step++) {
+            await page.evaluate((s) => (window as any).__touchScrollStep?.(s), step)
             await devtools.send("Input.dispatchTouchEvent", {
               type: "touchMove",
               touchPoints: [{ x, y: y + sign * (30 + step * 50) }],
             })
             await expect.poll(async () => (await anchor.boundingBox())?.y).toBeCloseTo(origin.y + sign * step * 50, 0)
           }
+
+          const touchScrollLog = await page.evaluate(() => (window as any).__touchScrollLog ?? [])
+          console.log(`swipe-${index}-scroll-log (last 20):`, JSON.stringify(touchScrollLog.slice(-20), null, 2))
           await devtools.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] })
           // Include release corrections through the scroll indicator's idle state.
           await expect(timeline.locator('[data-orientation="vertical"][data-visible="false"]')).toHaveCount(1)

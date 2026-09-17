@@ -90,7 +90,49 @@ test("clears the terminal line with Command+Delete", async ({ page }) => {
   await expect.poll(() => sendPtyOutput).toBeDefined()
   await expect.poll(() => terminal.evaluate((el) => el.contains(document.activeElement)), { timeout: 10_000 }).toBe(true)
 
+  // Instrument: capture keydown visibility on both the container and textarea
+  await terminal.evaluate((el) => {
+    const textarea = el.querySelector("textarea")
+    const log: Array<{
+      target: string
+      currentTarget: string
+      key: string
+      code: string
+      ctrlKey: boolean
+      metaKey: boolean
+      defaultPrevented: boolean
+      phase: number
+      activeElement: string
+    }> = []
+    for (const [name, node] of [["container", el], ["textarea", textarea]] as const) {
+      if (!node) continue
+      node.addEventListener(
+        "keydown",
+        (event) => {
+          const e = event as KeyboardEvent
+          log.push({
+            target: e.target === textarea ? "textarea" : e.target === el ? "container" : String(e.target),
+            currentTarget: name,
+            key: e.key,
+            code: e.code,
+            ctrlKey: e.ctrlKey,
+            metaKey: e.metaKey,
+            defaultPrevented: e.defaultPrevented,
+            phase: e.eventPhase,
+            activeElement: document.activeElement === textarea ? "textarea" : document.activeElement === el ? "container" : document.activeElement?.tagName ?? "null",
+          })
+        },
+        true,
+      )
+    }
+    ;(window as any).__keydownLog = log
+  })
+
   await page.keyboard.press(process.platform === "darwin" ? "Meta+Backspace" : "Control+u")
+
+  // Read instrumentation before the assertion so we get diagnostics on failure
+  const keydownLog = await page.evaluate(() => (window as any).__keydownLog ?? [])
+  console.log("keydown instrumentation:", JSON.stringify(keydownLog, null, 2))
 
   await expect.poll(() => ptyInput.join("")).toBe("\x15")
 })

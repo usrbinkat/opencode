@@ -39,6 +39,8 @@ runs:
       with:
         path: ${{ inputs.browsers-path }}
         key: ${{ runner.os }}-${{ runner.arch }}-playwright-${{ steps.version.outputs.version }}-${{ inputs.browser }}
+        restore-keys: |
+          ${{ runner.os }}-${{ runner.arch }}-playwright-
 
     - name: Install Playwright system dependencies
       if: runner.os == 'Linux'

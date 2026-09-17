@@ -63,6 +63,34 @@ test("selects a base branch for a new workspace", async ({ page }) => {
   await expect(search).toHaveValue("")
   await expect(page.getByRole("menuitemradio", { name: "feature/api", exact: true })).toBeChecked()
   await page.keyboard.press("Escape")
+
+  // Instrument: track activeElement over time after Escape to detect focus theft
+  const focusTrace = await page.evaluate(
+    (buttonName) =>
+      new Promise<Array<{ ms: number; tag: string; text: string; matches: boolean }>>((resolve) => {
+        const btn = [...document.querySelectorAll("button")].find((b) => b.textContent?.includes(buttonName))
+        const log: Array<{ ms: number; tag: string; text: string; matches: boolean }> = []
+        const start = performance.now()
+        const sample = () => {
+          const el = document.activeElement
+          log.push({
+            ms: Math.round(performance.now() - start),
+            tag: el?.tagName ?? "null",
+            text: el?.textContent?.slice(0, 40) ?? "",
+            matches: el === btn,
+          })
+        }
+        sample()
+        ;[10, 20, 50, 100, 200, 500].forEach((delay) => setTimeout(sample, delay))
+        setTimeout(() => {
+          sample()
+          resolve(log)
+        }, 600)
+      }),
+    "from feature/api",
+  )
+  console.log("focus trace after Escape:", JSON.stringify(focusTrace, null, 2))
+
   await expect.poll(() => selected.evaluate((el) => document.activeElement === el), { timeout: 10_000 }).toBe(true)
   await page.keyboard.press("Enter")
   await expect(search).toBeFocused()

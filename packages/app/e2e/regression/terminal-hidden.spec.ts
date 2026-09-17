@@ -223,6 +223,13 @@ type MotionProbe = {
   terminalAnchorGaps: number[]
   resetAnchorOnMotion: boolean
   panelGaps: number[]
+  panelGapObserverLog: Array<{
+    ms: number
+    terminalRegionHeight: number
+    panelGapExists: boolean
+    panelGapHeight: number
+    pushed: boolean
+  }>
   terminalBottoms: number[]
   heights: string[]
   animations: string[]
@@ -240,6 +247,7 @@ async function installMotionProbe(page: Page) {
       terminalAnchorGaps: [],
       resetAnchorOnMotion: false,
       panelGaps: [],
+      panelGapObserverLog: [],
       terminalBottoms: [],
       heights: [],
       animations: [],
@@ -278,8 +286,18 @@ async function installMotionProbe(page: Page) {
           probe.resetAnchorOnMotion = false
         }
         probe.terminalAnchorGaps.push(anchorGap)
-        if (panelGap && terminalRegion.getBoundingClientRect().height > 1)
-          probe.panelGaps.push(panelGap.getBoundingClientRect().height)
+        const trHeight = terminalRegion.getBoundingClientRect().height
+        const pgExists = !!panelGap
+        const pgHeight = panelGap ? panelGap.getBoundingClientRect().height : 0
+        const shouldPush = pgExists && trHeight > 1
+        probe.panelGapObserverLog.push({
+          ms: Math.round(performance.now()),
+          terminalRegionHeight: trHeight,
+          panelGapExists: pgExists,
+          panelGapHeight: pgHeight,
+          pushed: shouldPush,
+        })
+        if (shouldPush) probe.panelGaps.push(pgHeight)
         if (!review) return
         probe.paintGaps.push({
           review: Math.abs(reviewRegion.getBoundingClientRect().height - review.getBoundingClientRect().height),
@@ -471,10 +489,14 @@ async function resetPanelGaps(page: Page) {
 }
 
 async function expectPanelGapHeld(page: Page) {
+  const observerLog = await page.evaluate(
+    () => (window as Window & { __panelMotion?: MotionProbe }).__panelMotion?.panelGapObserverLog ?? [],
+  )
+  console.log("panelGap observer log:", JSON.stringify(observerLog.slice(-20), null, 2))
   const gaps = await page.evaluate(
     () => (window as Window & { __panelMotion?: MotionProbe }).__panelMotion?.panelGaps ?? [],
   )
-  expect(gaps.length).toBeGreaterThan(0)
+  expect(gaps.length, `panelGaps empty; observerLog has ${observerLog.length} entries`).toBeGreaterThan(0)
   // TODO: threshold lowered from 0.6 to 0.4 — CI renderers (ubuntu-24.04,
   // windows-2025) produce 0.5 ratio; investigate whether requestAnimationFrame
   // sampling rate or headless Chromium compositor timing is the root cause

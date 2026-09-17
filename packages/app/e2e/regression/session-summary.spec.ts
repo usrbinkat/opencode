@@ -24,9 +24,39 @@ for (const custom of [false, true]) {
     const trigger = page.getByRole("button", { name: "Session details", exact: true })
     const summary = page.getByRole("dialog", { name: "Session details", exact: true })
     await expect(trigger).toBeEnabled()
+
+    // Instrument: track pointer/hover events on the trigger and tooltip mount timing
+    await page.evaluate(() => {
+      const log: Array<{ ms: number; event: string; target: string; tooltipCount: number }> = []
+      const start = performance.now()
+      const record = (event: string, target: string) => {
+        log.push({
+          ms: Math.round(performance.now() - start),
+          event,
+          target,
+          tooltipCount: document.querySelectorAll('[role="tooltip"]').length,
+        })
+      }
+      const btn = document.querySelector('[aria-label="Session details"]') ?? document.querySelector('button')
+      if (btn) {
+        for (const type of ["pointerenter", "pointerover", "mouseenter", "mouseover", "pointerleave"]) {
+          btn.addEventListener(type, () => record(type, "trigger"))
+        }
+      }
+      new MutationObserver(() => {
+        const tooltip = document.querySelector('[role="tooltip"]')
+        if (tooltip) record("tooltip-mounted", tooltip.textContent?.slice(0, 40) ?? "")
+      }).observe(document.body, { childList: true, subtree: true })
+      ;(window as any).__tooltipLog = log
+    })
+
     await trigger.hover()
     const tooltip = page.getByRole("tooltip")
     await expect(tooltip).toBeVisible()
+
+    const tooltipLog = await page.evaluate(() => (window as any).__tooltipLog ?? [])
+    console.log("tooltip instrumentation:", JSON.stringify(tooltipLog, null, 2))
+
     await expect(tooltip).toContainText("Summary")
     const mac = await page.evaluate(() => /(Mac|iPod|iPhone|iPad)/.test(navigator.platform))
     const shortcut = custom ? "F8" : mac ? "Meta+Shift+Y" : "Control+Shift+Y"
