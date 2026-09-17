@@ -1,14 +1,14 @@
 export * as ShellParse from "./parse.js"
 
-import { Effect } from "effect"
+import { Context, Effect, Layer, Schema } from "effect"
 import { fileURLToPath } from "url"
 import os from "os"
 import path from "path"
-import type { Node } from "web-tree-sitter"
+import type { Parser, Language, Node } from "web-tree-sitter"
 import { shellParserWasm } from "#shell-parser-wasm"
 import { ShellSelect } from "./select.js"
-import { lazy } from "../util/lazy.js"
 import { Wildcard } from "../util/wildcard.js"
+import { makeGlobalNode } from "@opencode/util/effect/app-node"
 
 type Part = { type: string; text: string }
 const CWD = new Set(["cd", "chdir", "popd", "pushd", "push-location", "set-location"])
@@ -160,18 +160,126 @@ const ARITY: Record<string, number> = {
 }
 const PREFIX_LENGTH = Math.max(...Object.values(ARITY))
 
+export class InitializationError extends Schema.TaggedError<InitializationError>()(
+  "ShellParse.InitializationError",
+  { message: Schema.String, cause: Schema.optional(Schema.Defect()) },
+) {}
+
+type Parsers = { bash: Parser; ps: Parser }
+
+export interface Interface {
+  readonly scan: (
+    command: string,
+    shell: string,
+    cwd: string,
+    options?: { portable?: boolean },
+  ) => Effect.Effect<Result, Error | InitializationError>
+  readonly scanPortable: (
+    command: string,
+    shell: string,
+    cwd: string,
+  ) => Effect.Effect<Result, Error>
+}
+
+export class Service extends Context.Service<Service, Interface>()("@opencode/ShellParse") {}
+
+const layer = Layer.effect(
+  Service,
+  Effect.gen(function* () {
+    const loadParsers = yield* Effect.cached(
+      Effect.gen(function* () {
+        const started = Date.now()
+        yield* Effect.logInfo("shell parser initialization started")
+        const { Parser: ParserCtor, Language: LanguageCtor } = yield* Effect.tryPromise({
+          try: () => import("web-tree-sitter"),
+          catch: (cause) =>
+            new InitializationError({ message: "Failed to import web-tree-sitter", cause: cause as Error }),
+        })
+        yield* Effect.tryPromise({
+          try: () => ParserCtor.init({ locateFile: () => resolve(shellParserWasm.runtime) }),
+          catch: (cause) =>
+            new InitializationError({ message: "Failed to initialize tree-sitter WASM runtime", cause: cause as Error }),
+        })
+        const [bashLanguage, psLanguage] = yield* Effect.tryPromise({
+          try: () =>
+            Promise.all([
+              LanguageCtor.load(resolve(shellParserWasm.bash)),
+              LanguageCtor.load(resolve(shellParserWasm.powershell)),
+            ]) as Promise<[Language, Language]>,
+          catch: (cause) =>
+            new InitializationError({ message: "Failed to load tree-sitter language grammars", cause: cause as Error }),
+        })
+        const bash = new ParserCtor()
+        bash.setLanguage(bashLanguage)
+        const ps = new ParserCtor()
+        ps.setLanguage(psLanguage)
+        yield* Effect.logInfo("shell parser initialization completed", { durationMs: Date.now() - started })
+        return { bash, ps } as Parsers
+      }).pipe(Effect.withSpan("ShellParse.initialize")),
+    )
+    // Pre-warm: trigger initialization at layer build so the first scan call
+    // does not pay the WASM cold-start cost. Errors are cached and surfaced on
+    // scan, matching the photon.ts pattern for unavailable runtimes.
+    yield* loadParsers.pipe(Effect.ignore)
+    yield* Effect.addFinalizer(() =>
+      loadParsers.pipe(
+        Effect.tap((parsers) =>
+          Effect.sync(() => {
+            parsers.bash.delete()
+            parsers.ps.delete()
+          }),
+        ),
+        Effect.ignore,
+      ),
+    )
+
+    const scanMethod = Effect.fnUntraced(function* (
+      command: string,
+      shell: string,
+      cwd: string,
+      options?: { portable?: boolean },
+    ) {
+      if (options?.portable) return yield* scanPortableImpl(command, shell, cwd)
+      const parsers = yield* loadParsers
+      return yield* scanLegacyWith(parsers, command, shell, cwd)
+    })
+
+    const scanPortableMethod = Effect.fnUntraced(function* (
+      command: string,
+      shell: string,
+      cwd: string,
+    ) {
+      return yield* scanPortableImpl(command, shell, cwd)
+    })
+
+    return Service.of({ scan: scanMethod, scanPortable: scanPortableMethod })
+  }),
+)
+
+export { layer }
+export const node = makeGlobalNode({ service: Service, layer, deps: [] })
+
+/**
+ * Scan a shell command for permission-relevant resources and directory changes.
+ * Requires ShellParse.Service in the Effect context — provide it via the node
+ * graph (production) or via Effect.provide(ShellParse.layer) (tests/scripts).
+ */
 export const scan = Effect.fnUntraced(function* (
   command: string,
   shell: string,
   cwd: string,
   options?: { portable?: boolean },
 ) {
-  if (options?.portable) return yield* scanPortable(command, shell, cwd)
-  return yield* scanLegacy(command, shell, cwd)
+  const service = yield* Service
+  return yield* service.scan(command, shell, cwd, options)
 })
 
-const scanLegacy = Effect.fnUntraced(function* (command: string, shell: string, cwd: string) {
-  const parsers = yield* Effect.promise(load)
+const scanLegacyWith = Effect.fnUntraced(function* (
+  parsers: Parsers,
+  command: string,
+  shell: string,
+  cwd: string,
+) {
   const powershell = ShellSelect.ps(shell)
   const tree = (powershell ? parsers.ps : parsers.bash).parse(command)
   if (!tree) return yield* Effect.fail(new Error("Failed to parse shell command"))
@@ -204,7 +312,20 @@ const scanLegacy = Effect.fnUntraced(function* (command: string, shell: string, 
   )
 })
 
-export const scanPortable = Effect.fnUntraced(function* (command: string, shell: string, cwd: string) {
+/**
+ * Scan a shell command using the portable (JS-only) scanner. Requires
+ * ShellParse.Service in the Effect context.
+ */
+export const scanPortable = Effect.fnUntraced(function* (
+  command: string,
+  shell: string,
+  cwd: string,
+) {
+  const service = yield* Service
+  return yield* service.scanPortable(command, shell, cwd)
+})
+
+const scanPortableImpl = Effect.fnUntraced(function* (command: string, shell: string, cwd: string) {
   const { ShellScan } = yield* Effect.tryPromise({
     try: () => import("./scan.js"),
     catch: (cause) => new Error(`Portable shell scanner failed to load: ${cause}`, { cause }),
@@ -356,18 +477,3 @@ function resolve(asset: string) {
   return fileURLToPath(new URL(asset, import.meta.url))
 }
 
-const load = lazy(initialize)
-
-async function initialize() {
-  const { Parser, Language } = await import("web-tree-sitter")
-  await Parser.init({ locateFile: () => resolve(shellParserWasm.runtime) })
-  const [bashLanguage, psLanguage] = await Promise.all([
-    Language.load(resolve(shellParserWasm.bash)),
-    Language.load(resolve(shellParserWasm.powershell)),
-  ])
-  const bash = new Parser()
-  bash.setLanguage(bashLanguage)
-  const ps = new Parser()
-  ps.setLanguage(psLanguage)
-  return { bash, ps }
-}

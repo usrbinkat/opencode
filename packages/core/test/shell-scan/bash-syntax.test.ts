@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { Effect } from "effect"
 import { ShellParse } from "../../src/shell/parse.js"
 import { ShellScan } from "../../src/shell/scan.js"
+import { provide } from "./helpers.js"
 
 const fixtures = [
   ["if true; then VALUE=$(scan_probe); fi", ["true", "scan_probe"]],
@@ -165,8 +165,8 @@ describe("Bash shared heredoc delimiter grammar", () => {
     '(cat <<"E\\$OF"\nhello\nE$OF\n)',
     '(cat <<-"E\\OF"\n\thello\n\tE\\OF\n)',
   ])("preserves heredoc permission resources and saved prefixes: %s", async (source) => {
-    const legacy = await Effect.runPromise(ShellParse.scan(source, "/bin/bash", "/workspace"))
-    expect(await Effect.runPromise(ShellParse.scanPortable(source, "/bin/bash", "/workspace"))).toEqual(legacy)
+    const legacy = await provide(ShellParse.scan(source, "/bin/bash", "/workspace"))
+    expect(await provide(ShellParse.scanPortable(source, "/bin/bash", "/workspace"))).toEqual(legacy)
   })
 
   test.each([
@@ -179,8 +179,8 @@ describe("Bash shared heredoc delimiter grammar", () => {
     expect(result.kind).toBe("scanned")
     if (result.kind !== "scanned") throw new Error(result.reason)
     expect(result.commands.map((command) => command.words[0])).toEqual([...names])
-    const legacy = await Effect.runPromise(ShellParse.scan(source, "/bin/bash", "/workspace"))
-    expect(await Effect.runPromise(ShellParse.scanPortable(source, "/bin/bash", "/workspace"))).toEqual(legacy)
+    const legacy = await provide(ShellParse.scan(source, "/bin/bash", "/workspace"))
+    expect(await provide(ShellParse.scanPortable(source, "/bin/bash", "/workspace"))).toEqual(legacy)
   })
 
   test.each([

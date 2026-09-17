@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { Effect } from "effect"
 import { ShellParse } from "../../src/shell/parse.js"
 import { ShellScan } from "../../src/shell/scan.js"
+import { provide } from "./helpers.js"
 
 const conditions = ["[[ -n <(scan_probe) ]]", "[[ -n >(scan_probe) ]]"]
 const contexts = [
@@ -30,17 +30,17 @@ describe("legacy-accepted shell syntax regressions", () => {
     "preserves deeply indented function definitions: %s",
     async (source) => {
       const command = `( ${" ".repeat(32_000)}${source} )`
-      const legacy = await Effect.runPromise(ShellParse.scan(command, "zsh", "/workspace"))
-      expect(await Effect.runPromise(ShellParse.scanPortable(command, "zsh", "/workspace"))).toEqual(legacy)
+      const legacy = await provide(ShellParse.scan(command, "zsh", "/workspace"))
+      expect(await provide(ShellParse.scanPortable(command, "zsh", "/workspace"))).toEqual(legacy)
     },
   )
 
   test.each(conditions.flatMap((source) => contexts.map((context) => context(source))))(
     "retains conditional process substitutions and permission resources: %s",
     async (source) => {
-      const legacy = await Effect.runPromise(ShellParse.scan(source, "bash", "/workspace"))
+      const legacy = await provide(ShellParse.scan(source, "bash", "/workspace"))
       expect(legacy.commands.some((command) => command.resource === "scan_probe")).toBe(true)
-      expect(await Effect.runPromise(ShellParse.scanPortable(source, "bash", "/workspace"))).toEqual(legacy)
+      expect(await provide(ShellParse.scanPortable(source, "bash", "/workspace"))).toEqual(legacy)
     },
   )
 
@@ -52,9 +52,9 @@ describe("legacy-accepted shell syntax regressions", () => {
         ),
       ),
     )(`${shell} preserves line continuations at function boundaries: %s`, async (source) => {
-      const legacy = await Effect.runPromise(ShellParse.scan(source, shell, "/workspace"))
+      const legacy = await provide(ShellParse.scan(source, shell, "/workspace"))
       expect(legacy.commands.some((command) => command.resource === "scan_probe")).toBe(true)
-      expect(await Effect.runPromise(ShellParse.scanPortable(source, shell, "/workspace"))).toEqual(legacy)
+      expect(await provide(ShellParse.scanPortable(source, shell, "/workspace"))).toEqual(legacy)
     })
 
     test.each(
@@ -64,17 +64,17 @@ describe("legacy-accepted shell syntax regressions", () => {
         ),
       ),
     )(`${shell} preserves comments between a function head and its body: %s`, async (source) => {
-      const legacy = await Effect.runPromise(ShellParse.scan(source, shell, "/workspace"))
+      const legacy = await provide(ShellParse.scan(source, shell, "/workspace"))
       expect(legacy.commands.some((command) => command.resource === "scan_probe")).toBe(true)
-      expect(await Effect.runPromise(ShellParse.scanPortable(source, shell, "/workspace"))).toEqual(legacy)
+      expect(await provide(ShellParse.scanPortable(source, shell, "/workspace"))).toEqual(legacy)
     })
 
     test.each(functions)(
       `${shell} preserves function resources, saved prefixes, and directories: %s`,
       async (source) => {
-        const legacy = await Effect.runPromise(ShellParse.scan(source, shell, "/workspace"))
+        const legacy = await provide(ShellParse.scan(source, shell, "/workspace"))
         expect(legacy.commands.some((command) => command.resource === "scan_probe")).toBe(true)
-        expect(await Effect.runPromise(ShellParse.scanPortable(source, shell, "/workspace"))).toEqual(legacy)
+        expect(await provide(ShellParse.scanPortable(source, shell, "/workspace"))).toEqual(legacy)
       },
     )
 
@@ -116,9 +116,9 @@ describe("legacy-accepted shell syntax regressions", () => {
     "while() { scan_probe; break; }",
     "until() { scan_probe; break; }",
   ])("preserves Zsh anonymous functions and parenthesized loop permissions: %s", async (source) => {
-    const legacy = await Effect.runPromise(ShellParse.scan(source, "zsh", "/workspace"))
+    const legacy = await provide(ShellParse.scan(source, "zsh", "/workspace"))
     expect(legacy.commands.some((command) => command.resource === "scan_probe")).toBe(true)
-    expect(await Effect.runPromise(ShellParse.scanPortable(source, "zsh", "/workspace"))).toEqual(legacy)
+    expect(await provide(ShellParse.scanPortable(source, "zsh", "/workspace"))).toEqual(legacy)
   })
 
   // Tree-sitter recovers these valid Zsh forms with synthetic commands or truncated outer resources.
@@ -140,8 +140,8 @@ describe("legacy-accepted shell syntax regressions", () => {
       portable: ["printf '%s' \"$( () { scan_probe; }; printf visible)\"", "scan_probe", "printf visible"],
     },
   ])("accepts anonymous-function compositions despite legacy recovery artifacts: $source", async (fixture) => {
-    const legacy = await Effect.runPromise(ShellParse.scan(fixture.source, "zsh", "/workspace"))
-    const portable = await Effect.runPromise(ShellParse.scanPortable(fixture.source, "zsh", "/workspace"))
+    const legacy = await provide(ShellParse.scan(fixture.source, "zsh", "/workspace"))
+    const portable = await provide(ShellParse.scanPortable(fixture.source, "zsh", "/workspace"))
     expect(legacy.commands.map((command) => command.resource)).toEqual([...fixture.legacy])
     expect(portable.commands.map((command) => command.resource)).toEqual([...fixture.portable])
   })

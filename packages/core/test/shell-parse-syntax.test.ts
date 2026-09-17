@@ -1,22 +1,29 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect } from "bun:test"
 import { Effect } from "effect"
 import { ShellParse } from "../src/shell/parse.js"
 import { Wildcard } from "../src/util/wildcard.js"
+import { testEffect } from "./lib/effect"
+
+const it = testEffect(ShellParse.layer)
 
 describe("native shell syntax compatibility", () => {
-  test("PowerShell invocation approvals include the operator instead of saving an ineffective prefix", async () => {
-    const command = "& $Command value"
-    expect(await Effect.runPromise(ShellParse.scan(command, "pwsh", "/workspace"))).toEqual({
-      commands: [{ resource: command, save: "$Command *" }],
-      directories: [],
-    })
-    expect(await Effect.runPromise(ShellParse.scan(command, "pwsh", "/workspace", { portable: true }))).toEqual({
-      commands: [{ resource: command, save: "& $Command *" }],
-      directories: [],
-    })
-  })
+  it.effect(
+    "PowerShell invocation approvals include the operator instead of saving an ineffective prefix",
+    () =>
+      Effect.gen(function* () {
+        const command = "& $Command value"
+        expect(yield* ShellParse.scan(command, "pwsh", "/workspace")).toEqual({
+          commands: [{ resource: command, save: "$Command *" }],
+          directories: [],
+        })
+        expect(yield* ShellParse.scan(command, "pwsh", "/workspace", { portable: true })).toEqual({
+          commands: [{ resource: command, save: "& $Command *" }],
+          directories: [],
+        })
+      }),
+  )
 
-  test.each([
+  for (const command of [
     "ForEach-Object { Write-Output value }",
     "Write-Output before; ForEach-Object { Write-Output value }",
     "ForEach-Object { Write-Output value } | Write-Output done",
@@ -25,15 +32,22 @@ describe("native shell syntax compatibility", () => {
     "& 'ForEach-Object' { Write-Output value }",
     "% { Write-Output value }",
     "Where-Object { Write-Output value }",
-  ])("PowerShell scriptblock callers preserve permission resources and usable approvals: %s", async (command) => {
-    const legacy = await Effect.runPromise(ShellParse.scan(command, "pwsh", "/workspace"))
-    const native = await Effect.runPromise(ShellParse.scan(command, "pwsh", "/workspace", { portable: true }))
-    expect(native.commands.map((item) => item.resource)).toEqual(legacy.commands.map((item) => item.resource))
-    for (const item of native.commands) expect(Wildcard.match(item.resource, item.save), item.resource).toBe(true)
-  })
+  ]) {
+    it.effect(
+      `PowerShell scriptblock callers preserve permission resources and usable approvals: ${command}`,
+      () =>
+        Effect.gen(function* () {
+          const legacy = yield* ShellParse.scan(command, "pwsh", "/workspace")
+          const native = yield* ShellParse.scan(command, "pwsh", "/workspace", { portable: true })
+          expect(native.commands.map((item) => item.resource)).toEqual(legacy.commands.map((item) => item.resource))
+          for (const item of native.commands)
+            expect(Wildcard.match(item.resource, item.save), item.resource).toBe(true)
+        }),
+    )
+  }
 
   for (const shell of ["bash", "zsh"]) {
-    test.each([
+    for (const command of [
       "cat <<'EOF'\n$(not_a_command)\nEOF",
       "cat <<EOF\n$(printf hello)\nEOF",
       "cat <<-EOF\n\thello\n\tEOF",
@@ -67,30 +81,34 @@ describe("native shell syntax compatibility", () => {
       "((count++))",
       "for ((i=0; i<2; i++)); do printf ok; done",
       "echo `printf \\2`",
-    ])(`${shell} extracts commands without rejecting ordinary syntax: %s`, async (command) => {
-      const legacy = await Effect.runPromise(ShellParse.scan(command, shell, "/workspace"))
-      const native = await Effect.runPromise(ShellParse.scan(command, shell, "/workspace", { portable: true }))
-      expect(native).toEqual(legacy)
-      expect(await Effect.runPromise(ShellParse.scanPortable(command, shell, "/workspace"))).toEqual(native)
-    })
+    ]) {
+      it.effect(`${shell} extracts commands without rejecting ordinary syntax: ${command}`, () =>
+        Effect.gen(function* () {
+          const legacy = yield* ShellParse.scan(command, shell, "/workspace")
+          const native = yield* ShellParse.scan(command, shell, "/workspace", { portable: true })
+          expect(native).toEqual(legacy)
+          expect(yield* ShellParse.scanPortable(command, shell, "/workspace")).toEqual(native)
+        }),
+      )
+    }
   }
 
-  test("does not invent commands from a quoted second heredoc body", async () => {
-    const command = "cat <<FIRST <<'SECOND'\n$(printf first)\nFIRST\n$(not_a_command)\nSECOND"
-    const expected = {
-      commands: [
-        { resource: command, save: "cat *" },
-        { resource: "printf first", save: "printf *" },
-      ],
-      directories: [],
-    }
-    expect(await Effect.runPromise(ShellParse.scanPortable(command, "bash", "/workspace"))).toEqual(expected)
-    expect(await Effect.runPromise(ShellParse.scan(command, "bash", "/workspace", { portable: true }))).toEqual(
-      expected,
-    )
-  })
+  it.effect("does not invent commands from a quoted second heredoc body", () =>
+    Effect.gen(function* () {
+      const command = "cat <<FIRST <<'SECOND'\n$(printf first)\nFIRST\n$(not_a_command)\nSECOND"
+      const expected = {
+        commands: [
+          { resource: command, save: "cat *" },
+          { resource: "printf first", save: "printf *" },
+        ],
+        directories: [],
+      }
+      expect(yield* ShellParse.scanPortable(command, "bash", "/workspace")).toEqual(expected)
+      expect(yield* ShellParse.scan(command, "bash", "/workspace", { portable: true })).toEqual(expected)
+    }),
+  )
 
-  test.each([
+  for (const command of [
     'Write-Output "$(Get-Location)"',
     "$value = Get-Date; Write-Output $value",
     "if ($true) { Write-Output yes } else { Write-Output no }",
@@ -105,10 +123,14 @@ describe("native shell syntax compatibility", () => {
     "<# comment #> Write-Output done",
     "Write-Output @'\nhello\n'@",
     "git st`atus",
-  ])("PowerShell extracts commands without rejecting ordinary syntax: %s", async (command) => {
-    const legacy = await Effect.runPromise(ShellParse.scan(command, "pwsh", "/workspace"))
-    const native = await Effect.runPromise(ShellParse.scan(command, "pwsh", "/workspace", { portable: true }))
-    expect(native).toEqual(legacy)
-    expect(await Effect.runPromise(ShellParse.scanPortable(command, "pwsh", "/workspace"))).toEqual(native)
-  })
+  ]) {
+    it.effect(`PowerShell extracts commands without rejecting ordinary syntax: ${command}`, () =>
+      Effect.gen(function* () {
+        const legacy = yield* ShellParse.scan(command, "pwsh", "/workspace")
+        const native = yield* ShellParse.scan(command, "pwsh", "/workspace", { portable: true })
+        expect(native).toEqual(legacy)
+        expect(yield* ShellParse.scanPortable(command, "pwsh", "/workspace")).toEqual(native)
+      }),
+    )
+  }
 })

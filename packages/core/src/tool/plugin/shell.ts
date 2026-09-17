@@ -111,6 +111,7 @@ export const Plugin = {
     const compatibleShell = shellSelect.resolve({ priority: "compat" })
     const permission = yield* Permission.Service
     const config = yield* Config.Service
+    const shellParse = yield* ShellParse.Service
 
     const prepare = Effect.fn("ShellTool.prepare")(function* (invocation: ShellCreateBefore, context: Tool.Context) {
       const source = {
@@ -122,7 +123,7 @@ export const Plugin = {
       invocation.cwd = target.absolute
       const timeout = invocation.timeout
       const portable = Config.latest(yield* config.entries(), "experimental")?.portable_shell_scanner === true
-      const parsed = yield* ShellParse.scan(invocation.command, invocation.shell, target.absolute, { portable })
+      const parsed = yield* shellParse.scan(invocation.command, invocation.shell, target.absolute, { portable })
       const directories = yield* Effect.forEach(parsed.directories, (directory) =>
         access.resolve({
           path: FileAccess.resolvePath(target.absolute, directory),
