@@ -46,25 +46,46 @@ const run = <A, E, R, E2>(value: Body<A, E, R | Scope.Scope>, layer: Layer.Layer
     return yield* exit
   }).pipe(Effect.runPromise)
 
+type EffectTest<R> = {
+  <A, E>(name: string, value: Body<A, E, R | Scope.Scope>, opts?: number | TestOptions): void
+  only: <A, E>(name: string, value: Body<A, E, R | Scope.Scope>, opts?: number | TestOptions) => void
+  skip: <A, E>(name: string, value: Body<A, E, R | Scope.Scope>, opts?: number | TestOptions) => void
+  skipIf: (condition: boolean) => EffectTest<R>
+  each: <T extends readonly unknown[]>(
+    table: readonly T[],
+  ) => (name: string, fn: (...args: T) => Body<unknown, unknown, R | Scope.Scope>, opts?: number | TestOptions) => void
+}
+
+function wrapTest<R>(register: typeof test, layer: Layer.Layer<R, unknown>): EffectTest<R> {
+  const fn = <A, E>(name: string, value: Body<A, E, R | Scope.Scope>, opts?: number | TestOptions) =>
+    register(name, () => run(value, layer), opts)
+
+  fn.only = <A, E>(name: string, value: Body<A, E, R | Scope.Scope>, opts?: number | TestOptions) =>
+    register.only(name, () => run(value, layer), opts)
+
+  fn.skip = <A, E>(name: string, value: Body<A, E, R | Scope.Scope>, opts?: number | TestOptions) =>
+    register.skip(name, () => run(value, layer), opts)
+
+  fn.skipIf = (condition: boolean): EffectTest<R> => wrapTest(test.skipIf(condition) as typeof test, layer)
+
+  fn.each = <T extends readonly unknown[]>(table: readonly T[]) =>
+    (name: string, factory: (...args: T) => Body<unknown, unknown, R | Scope.Scope>, opts?: number | TestOptions) => {
+      for (const row of table) {
+        const args = (Array.isArray(row) ? row : [row]) as unknown as T
+        const interpolated = args.reduce<string>(
+          (acc, arg, index) => acc.replace(/%[sdjiop%#]/, () => (index < args.length ? String(arg) : "")),
+          name,
+        )
+        register(interpolated, () => run(factory(...args), layer), opts)
+      }
+    }
+
+  return fn
+}
+
 const make = <R, E>(testLayer: Layer.Layer<R, E>, liveLayer: Layer.Layer<R, E>) => {
-  const effect = <A, E2>(name: string, value: Body<A, E2, R | Scope.Scope>, opts?: number | TestOptions) =>
-    test(name, () => run(value, testLayer), opts)
-
-  effect.only = <A, E2>(name: string, value: Body<A, E2, R | Scope.Scope>, opts?: number | TestOptions) =>
-    test.only(name, () => run(value, testLayer), opts)
-
-  effect.skip = <A, E2>(name: string, value: Body<A, E2, R | Scope.Scope>, opts?: number | TestOptions) =>
-    test.skip(name, () => run(value, testLayer), opts)
-
-  const live = <A, E2>(name: string, value: Body<A, E2, R | Scope.Scope>, opts?: number | TestOptions) =>
-    test(name, () => run(value, liveLayer), opts)
-
-  live.only = <A, E2>(name: string, value: Body<A, E2, R | Scope.Scope>, opts?: number | TestOptions) =>
-    test.only(name, () => run(value, liveLayer), opts)
-
-  live.skip = <A, E2>(name: string, value: Body<A, E2, R | Scope.Scope>, opts?: number | TestOptions) =>
-    test.skip(name, () => run(value, liveLayer), opts)
-
+  const effect = wrapTest(test, testLayer)
+  const live = wrapTest(test, liveLayer)
   return { effect, live }
 }
 

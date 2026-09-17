@@ -1,17 +1,22 @@
 import { describe, expect, test } from "bun:test"
+import { Effect } from "effect"
 import { ShellParse } from "../../src/shell/parse.js"
 import { ShellScan } from "../../src/shell/scan.js"
 import { Wildcard } from "../../src/util/wildcard.js"
-import { provide } from "./helpers.js"
+import { testEffect } from "../lib/effect"
 
-async function parity(source: string) {
-  const legacy = await provide(ShellParse.scan(source, "/bin/bash", "/workspace"))
-  const native = await provide(ShellParse.scanPortable(source, "/bin/bash", "/workspace"))
-  expect(native, source).toEqual(legacy)
+const it = testEffect(ShellParse.layer)
+
+function parity(source: string) {
+  return Effect.gen(function* () {
+    const legacy = yield* ShellParse.scan(source, "/bin/bash", "/workspace")
+    const native = yield* ShellParse.scanPortable(source, "/bin/bash", "/workspace")
+    expect(native, source).toEqual(legacy)
+  })
 }
 
 describe("Bash redirect resource oracle", () => {
-  test.each([
+  for (const [source, resources] of [
     ["printf hello | cat > marker", ["printf hello", "cat"]],
     ["printf ok && git status > output", ["printf ok", "git status"]],
     ["cat > output", ["cat > output"]],
@@ -20,34 +25,40 @@ describe("Bash redirect resource oracle", () => {
     ["pwd && cat > output file", ["pwd", "cat"]],
     ["pwd; cat > output", ["pwd", "cat > output"]],
     ["pwd\ncat > output", ["pwd", "cat > output"]],
-  ] as const)("matches exact permission resources: %s", async (source, resources) => {
-    const legacy = await provide(ShellParse.scan(source, "/bin/bash", "/workspace"))
-    expect(legacy.commands.map((command) => command.resource)).toEqual([...resources])
-    await parity(source)
-  })
+  ] as const) {
+    it.effect(`matches exact permission resources: ${source}`, () =>
+      Effect.gen(function* () {
+        const legacy = yield* ShellParse.scan(source, "/bin/bash", "/workspace")
+        expect(legacy.commands.map((command) => command.resource)).toEqual([...resources])
+        yield* parity(source)
+      }),
+    )
+  }
 
-  test("matches redirect positions across generated list and pipeline boundaries", async () => {
-    const redirects = [">output", ">>output", "<input", "2>err", "2>&1", "<&0", ">|output", "&>output", "&>>output"]
-    const separators = [" | ", " |& ", " && ", " || ", "; ", " & ", "\n"]
-    for (const redirect of redirects) {
-      for (const command of [
-        `${redirect} git status`,
-        `git ${redirect} status`,
-        `git status ${redirect}`,
-        `${redirect} git status 3>tail`,
-        `${redirect} FOO=bar git status 3>tail`,
-        `npm run ${redirect} test`,
-      ]) {
-        await parity(command)
-        for (const separator of separators) {
-          await parity(`printf ok${separator}${command}`)
-          await parity(`${command}${separator}pwd >last`)
+  it.effect("matches redirect positions across generated list and pipeline boundaries", () =>
+    Effect.gen(function* () {
+      const redirects = [">output", ">>output", "<input", "2>err", "2>&1", "<&0", ">|output", "&>output", "&>>output"]
+      const separators = [" | ", " |& ", " && ", " || ", "; ", " & ", "\n"]
+      for (const redirect of redirects) {
+        for (const command of [
+          `${redirect} git status`,
+          `git ${redirect} status`,
+          `git status ${redirect}`,
+          `${redirect} git status 3>tail`,
+          `${redirect} FOO=bar git status 3>tail`,
+          `npm run ${redirect} test`,
+        ]) {
+          yield* parity(command)
+          for (const separator of separators) {
+            yield* parity(`printf ok${separator}${command}`)
+            yield* parity(`${command}${separator}pwd >last`)
+          }
         }
       }
-    }
-  })
+    }),
+  )
 
-  test.each([
+  for (const source of [
     "pwd | cat >out | tail >log",
     "pwd && cat >out || tail >log",
     "pwd && cat >out | tail >log",
@@ -84,7 +95,9 @@ describe("Bash redirect resource oracle", () => {
     "time git status",
     "time -p git status",
     "coproc git status",
-  ])("preserves nested commands, prefixes, and context: %s", parity)
+  ]) {
+    it.effect(`preserves nested commands, prefixes, and context: ${source}`, () => parity(source))
+  }
 
   test("keeps lexical words and nested redirect-target commands after narrowing the resource", () => {
     const result = ShellScan.scan('pwd | git >"$(printf output)" status')
@@ -99,56 +112,69 @@ describe("Bash redirect resource oracle", () => {
     expect(result.commands[2]).toMatchObject({ resource: "printf output", rawWords: ["printf", "output"] })
   })
 
-  test("excludes ignored trailing continuations from narrowed command prefixes", async () => {
-    const source = "pwd | cat\\\n >out"
-    const legacy = await provide(ShellParse.scan(source, "/bin/bash", "/workspace"))
-    const result = ShellScan.scan(source)
-    expect(result.kind).toBe("scanned")
-    if (result.kind !== "scanned") throw new Error(`Unexpected opacity: ${result.reason}`)
-    expect(result.commands.map((command) => command.resource)).toEqual(
-      legacy.commands.map((command) => command.resource),
-    )
-    expect(result.commands[1]?.rawWords).toEqual(["cat"])
-    expect(legacy.commands[1]).toEqual({ resource: "cat", save: "cat *" })
-    const native = await provide(ShellParse.scanPortable(source, "/bin/bash", "/workspace"))
-    expect(native).toEqual(legacy)
-    expect(native.commands.every((command) => Wildcard.match(command.resource, command.save))).toBe(true)
-  })
-
-  test.each(["cat\\\n", "cat \\\n", "cat\\\n\\\n", "cat\\\n;", "cat >out\\\n", "cat >out \\\n"])(
-    "saved prefixes cover their standalone continuation command: %j",
-    async (source) => {
-      await parity(source)
+  it.effect("excludes ignored trailing continuations from narrowed command prefixes", () =>
+    Effect.gen(function* () {
+      const source = "pwd | cat\\\n >out"
+      const legacy = yield* ShellParse.scan(source, "/bin/bash", "/workspace")
       const result = ShellScan.scan(source)
       expect(result.kind).toBe("scanned")
-      if (result.kind !== "scanned") throw new Error(result.reason)
-      expect(result.commands[0]?.rawWords).toEqual(["cat"])
-      const native = await provide(ShellParse.scanPortable(source, "/bin/bash", "/workspace"))
-      expect(native.commands[0]).toEqual({ resource: source.includes(">out") ? "cat >out" : "cat", save: "cat *" })
+      if (result.kind !== "scanned") throw new Error(`Unexpected opacity: ${result.reason}`)
+      expect(result.commands.map((command) => command.resource)).toEqual(
+        legacy.commands.map((command) => command.resource),
+      )
+      expect(result.commands[1]?.rawWords).toEqual(["cat"])
+      expect(legacy.commands[1]).toEqual({ resource: "cat", save: "cat *" })
+      const native = yield* ShellParse.scanPortable(source, "/bin/bash", "/workspace")
+      expect(native).toEqual(legacy)
       expect(native.commands.every((command) => Wildcard.match(command.resource, command.save))).toBe(true)
-    },
+    }),
   )
 
-  test.each(["printf 'literal\\\n'\\\n", 'printf "literal\\\n"\\\n', "printf a\\\nb\\\n", 'printf a\\\n""\\\n'])(
-    "preserves meaningful raw syntax before an ignored trailing continuation: %j",
-    async (source) => {
-      await parity(source)
-      const result = ShellScan.scan(source)
-      expect(result.kind).toBe("scanned")
-      if (result.kind !== "scanned") throw new Error(result.reason)
-      expect(result.commands[0]?.resource).toBe(source.slice(0, -2))
-      expect(result.commands[0]?.rawWords).toEqual(["printf", source.slice("printf ".length, -2)])
-    },
-  )
+  for (const source of ["cat\\\n", "cat \\\n", "cat\\\n\\\n", "cat\\\n;", "cat >out\\\n", "cat >out \\\n"]) {
+    it.effect(`saved prefixes cover their standalone continuation command: ${JSON.stringify(source)}`, () =>
+      Effect.gen(function* () {
+        yield* parity(source)
+        const result = ShellScan.scan(source)
+        expect(result.kind).toBe("scanned")
+        if (result.kind !== "scanned") throw new Error(result.reason)
+        expect(result.commands[0]?.rawWords).toEqual(["cat"])
+        const native = yield* ShellParse.scanPortable(source, "/bin/bash", "/workspace")
+        expect(native.commands[0]).toEqual({ resource: source.includes(">out") ? "cat >out" : "cat", save: "cat *" })
+        expect(native.commands.every((command) => Wildcard.match(command.resource, command.save))).toBe(true)
+      }),
+    )
+  }
 
-  test("known gap: assignment then redirect on a pipeline RHS retains the native command", async () => {
-    const source = "printf ok | FOO=bar >output git status 3>tail"
-    const legacy = await provide(ShellParse.scan(source, "/bin/bash", "/workspace"))
-    const native = await provide(ShellParse.scanPortable(source, "/bin/bash", "/workspace"))
-    expect(legacy.commands).toEqual([{ resource: "printf ok", save: "printf *" }])
-    expect(native.commands).toEqual([
-      { resource: "printf ok", save: "printf *" },
-      { resource: "FOO=bar >output git status", save: "git status *" },
-    ])
-  })
+  for (const source of [
+    "printf 'literal\\\n'\\\n",
+    'printf "literal\\\n"\\\n',
+    "printf a\\\nb\\\n",
+    'printf a\\\n""\\\n',
+  ]) {
+    it.effect(
+      `preserves meaningful raw syntax before an ignored trailing continuation: ${JSON.stringify(source)}`,
+      () =>
+        Effect.gen(function* () {
+          yield* parity(source)
+          const result = ShellScan.scan(source)
+          expect(result.kind).toBe("scanned")
+          if (result.kind !== "scanned") throw new Error(result.reason)
+          expect(result.commands[0]?.resource).toBe(source.slice(0, -2))
+          expect(result.commands[0]?.rawWords).toEqual(["printf", source.slice("printf ".length, -2)])
+        }),
+    )
+  }
+
+  it.effect("known gap: assignment then redirect on a pipeline RHS retains the native command", () =>
+    Effect.gen(function* () {
+      const source = "printf ok | FOO=bar >output git status 3>tail"
+      const legacy = yield* ShellParse.scan(source, "/bin/bash", "/workspace")
+      const native = yield* ShellParse.scanPortable(source, "/bin/bash", "/workspace")
+      expect(legacy.commands).toEqual([{ resource: "printf ok", save: "printf *" }])
+      expect(native.commands).toEqual([
+        { resource: "printf ok", save: "printf *" },
+        { resource: "FOO=bar >output git status", save: "git status *" },
+      ])
+    }),
+  )
 })

@@ -60,13 +60,18 @@ describe("portable shell parser compatibility", () => {
                 `
             import { Effect } from "effect"
             import { ShellParse } from "./src/shell/parse.ts"
-            const command = ${JSON.stringify(command)}
-            const shell = ${JSON.stringify(shell)}
-            const run = (effect) => Effect.runPromise(effect.pipe(Effect.provide(ShellParse.layer)))
-            const legacy = await run(ShellParse.scan(command, shell, "/workspace"))
-            const portable = await run(ShellParse.scan(command, shell, "/workspace", { portable: true }))
-            const native = await run(ShellParse.scanPortable(command, shell, "/workspace"))
-            console.log(JSON.stringify([legacy, portable, native]))
+            try {
+              const command = ${JSON.stringify(command)}
+              const shell = ${JSON.stringify(shell)}
+              const run = (effect) => Effect.runPromise(effect.pipe(Effect.provide(ShellParse.layer)))
+              const legacy = await run(ShellParse.scan(command, shell, "/workspace"))
+              const portable = await run(ShellParse.scan(command, shell, "/workspace", { portable: true }))
+              const native = await run(ShellParse.scanPortable(command, shell, "/workspace"))
+              console.log(JSON.stringify([legacy, portable, native]))
+            } catch (e) {
+              console.error(e instanceof Error ? e.stack ?? e.message : String(e))
+              process.exit(1)
+            }
           `,
               ],
               cwd: `${import.meta.dir}/..`,
@@ -81,8 +86,25 @@ describe("portable shell parser compatibility", () => {
                 child.exited,
               ]),
             )
+            if (code !== 0) {
+              yield* Effect.logError("subprocess exited with non-zero code", {
+                code,
+                stdout: output.slice(0, 500),
+                stderr: error.slice(0, 500),
+              })
+            }
             expect(code, error).toBe(0)
-            const [legacy, portable, native] = JSON.parse(output)
+            let parsed: unknown[]
+            try {
+              parsed = JSON.parse(output)
+            } catch (e) {
+              yield* Effect.logError("subprocess JSON parse failed", {
+                stdout: output.slice(0, 1000),
+                stderr: error.slice(0, 1000),
+              })
+              throw e
+            }
+            const [legacy, portable, native] = parsed
             expect(portable).toEqual(legacy)
             expect(native).toEqual(legacy)
           }),
