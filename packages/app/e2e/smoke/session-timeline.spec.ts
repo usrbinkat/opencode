@@ -600,7 +600,9 @@ async function scrollTimelineUp(page: Page, before: SmokeState) {
         }
 
         scroller.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -1, deltaMode: 0 }))
-        scroller.scrollTop = Math.max(0, scroller.scrollTop - Math.max(80, Math.round(scroller.clientHeight * 0.45)))
+        // TODO: re-evaluate step size on higher-performance runners; 0.45 skips
+        // intermediate virtual list items on ubuntu-24.04 and windows-2025 GHA runners
+        scroller.scrollTop = Math.max(0, scroller.scrollTop - Math.max(80, Math.round(scroller.clientHeight * 0.2)))
 
         const read = () => (window as SmokeWindow).__timelineSmokeState?.().signature ?? ""
         let frames = 0

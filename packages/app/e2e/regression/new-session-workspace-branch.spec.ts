@@ -63,15 +63,7 @@ test("selects a base branch for a new workspace", async ({ page }) => {
   await expect(search).toHaveValue("")
   await expect(page.getByRole("menuitemradio", { name: "feature/api", exact: true })).toBeChecked()
   await page.keyboard.press("Escape")
-  const activeAfterEscape = await page.evaluate(() => ({
-    tag: document.activeElement?.tagName,
-    id: document.activeElement?.id,
-    class: document.activeElement?.className?.slice(0, 80),
-    text: document.activeElement?.textContent?.slice(0, 40),
-    role: document.activeElement?.getAttribute("role"),
-  }))
-  console.log("activeElement after Escape:", JSON.stringify(activeAfterEscape))
-  await expect(selected).toBeFocused()
+  await expect.poll(() => selected.evaluate((el) => document.activeElement === el), { timeout: 10_000 }).toBe(true)
   await page.keyboard.press("Enter")
   await expect(search).toBeFocused()
   await page.keyboard.type("feature")

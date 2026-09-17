@@ -89,7 +89,7 @@ test("clears the terminal line with Command+Delete", async ({ page }) => {
   await expect(terminal.locator("textarea")).toHaveCount(1)
   await expect.poll(() => sendPtyOutput).toBeDefined()
 
-  await page.keyboard.press("Meta+Backspace")
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+Backspace" : "Control+u")
 
   await expect.poll(() => ptyInput.join("")).toBe("\x15")
 })

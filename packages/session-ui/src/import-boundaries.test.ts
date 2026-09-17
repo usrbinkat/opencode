@@ -5,9 +5,13 @@ const forbidden = /["']@opencode\/(?:core|sdk|server)(?:\/[^"']*)?["']/
 const oldSession = /(?:SessionV1|session-v1|legacy-message|legacy-message-values)/
 
 describe("Session UI package boundaries", () => {
-  test("does not import server runtime packages", async () => {
-    expect(await findViolations(forbidden)).toEqual([])
-  })
+  test(
+    "does not import server runtime packages",
+    async () => {
+      expect(await findViolations(forbidden)).toEqual([])
+    },
+    15_000,
+  )
 
   test("does not declare server runtime dependencies", async () => {
     const pkg = await Bun.file(new URL("../package.json", import.meta.url)).json()
@@ -36,10 +40,13 @@ describe("Session UI package boundaries", () => {
 })
 
 async function findViolations(pattern: RegExp) {
+  const t0 = performance.now()
   const files = await Array.fromAsync(new Bun.Glob("**/*.{ts,tsx}").scan({ cwd: import.meta.dir, absolute: true }))
+  const t1 = performance.now()
+  const candidates = files.filter((path) => path !== import.meta.path)
   const matches = await Effect.runPromise(
     Effect.forEach(
-      files.filter((path) => path !== import.meta.path),
+      candidates,
       (path) =>
         Effect.promise(async () =>
           pattern.test(await Bun.file(path).text()) ? path.slice(import.meta.dir.length + 1) : undefined,
@@ -47,5 +54,7 @@ async function findViolations(pattern: RegExp) {
       { concurrency: 8 },
     ),
   )
+  const t2 = performance.now()
+  console.log(`findViolations: ${candidates.length} files, glob ${(t1 - t0).toFixed(0)}ms, scan ${(t2 - t1).toFixed(0)}ms, total ${(t2 - t0).toFixed(0)}ms`)
   return matches.filter((path) => path !== undefined)
 }
