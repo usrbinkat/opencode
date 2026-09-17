@@ -147,6 +147,11 @@ runs:
         restore-keys: |
           ${{ runner.os }}-bun-
 
+    - name: Install ripgrep
+      if: runner.os == 'Windows'
+      shell: bash
+      run: choco install ripgrep -y --no-progress
+
     - name: Install setuptools for distutils compatibility
       if: runner.os != 'Linux'
       shell: bash
