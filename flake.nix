@@ -84,6 +84,7 @@
         pkgs.pkg-config
         pkgs.openssl
         pkgs.git
+        pkgs.ripgrep
         pkgs.bun2nix
         pkgs.ffmpeg
       ];
