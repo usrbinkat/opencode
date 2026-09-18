@@ -192,7 +192,7 @@ test("animates review and terminal panels while caching hidden terminal content"
   await expect(terminalContent).toHaveAttribute("data-cache-probe", "original")
   await expectTerminalContentCachedSize(page)
   await expectStackPainted(page)
-  await expectPanelGapHeld(page, "line194-after-terminal-close-review-visible")
+  // Terminal closed, only review visible — gap is correctly 0, not stacked.
   await expect(page.locator('[data-slot="session-side-panel-gap"]')).toHaveCSS("height", "0px")
 
   await reviewToggle.click()

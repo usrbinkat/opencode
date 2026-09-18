@@ -550,7 +550,7 @@ async function expectCanScrollToStart(
     current = await timelineState(page)
     if (!changed && current.signature === before.signature && current.scrollTop <= 1) unchangedAtTop++
     else unchangedAtTop = 0
-    if (unchangedAtTop >= 2) {
+    if (unchangedAtTop >= 4) {
       console.log(
         `scroll traversal exited early: attempt=${attempt}, unchangedAtTop=${unchangedAtTop}, ` +
           `scrollTop=${current.scrollTop}, seenParts=${seenParts.size}/${expectedPartIDs.length}, ` +
@@ -565,6 +565,19 @@ async function expectCanScrollToStart(
           `seenMessages=${seenMessages.size}/${expectedMessageIDs.length}`,
       )
     }
+  }
+
+  // Post-scroll stabilization: the virtualizer may not have mounted all items
+  // in the visible range when the scroll position converged. Wait up to 30
+  // additional frames for the signature to settle and collect any newly mounted
+  // parts. This covers the case where scrollTop=0 is reached but the overscan
+  // window hasn't expanded to include the first few items yet.
+  for (let settle = 0; settle < 30; settle++) {
+    const next = await timelineState(page)
+    collectSeen(next, seenParts, seenMessages)
+    if (seenParts.size >= expectedPartIDs.length && seenMessages.size >= expectedMessageIDs.length) break
+    if (next.signature !== current.signature) current = next
+    await page.waitForTimeout(16)
   }
 
   collectSeen(current, seenParts, seenMessages)

@@ -311,11 +311,17 @@ export function PromptWorkspaceSelector(props: {
                 class="w-[243px] overflow-hidden rounded-md border-0 bg-v2-background-bg-layer-01 shadow-[var(--v2-elevation-floating)] focus:outline-none"
                 onOpenAutoFocus={(event) => {
                   event.preventDefault()
-                  branchDismiss.allowTriggerRestore()
                   // Kobalte defers its list autofocus until after the focus scope opens.
                   setTimeout(() => requestAnimationFrame(() => branchSearchInput?.focus({ preventScroll: true })))
                 }}
-                onCloseAutoFocus={branchDismiss.onCloseAutoFocus}
+                onCloseAutoFocus={(event) => {
+                  // Prevent Kobalte's default and the controller's synchronous focus.
+                  // The composer's document-level keydown handler claims focus from BODY
+                  // ~100ms after the focus scope releases. afterClose waits for the menu
+                  // content to unmount and the scope teardown to settle before focusing.
+                  event.preventDefault()
+                  branchDismiss.afterClose(() => branchTriggerRef?.focus())
+                }}
               >
                 <div class="flex h-7 shrink-0 items-center gap-2 rounded-sm pl-3 pr-2.5 text-v2-icon-icon-muted">
                   <Icon name="magnifying-glass" size="small" class="shrink-0" />

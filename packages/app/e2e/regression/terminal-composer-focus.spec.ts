@@ -90,117 +90,33 @@ test("clears the terminal line with Command+Delete", async ({ page }) => {
   await expect.poll(() => sendPtyOutput).toBeDefined()
   await expect.poll(() => terminal.evaluate((el) => el.contains(document.activeElement)), { timeout: 10_000 }).toBe(true)
 
-  // Instrument: capture keydown visibility on both the container and textarea
-  await terminal.evaluate((el) => {
-    const textarea = el.querySelector("textarea")
-    const log: Array<{
-      target: string
-      currentTarget: string
-      key: string
-      code: string
-      ctrlKey: boolean
-      metaKey: boolean
-      defaultPrevented: boolean
-      phase: number
-      activeElement: string
-    }> = []
-    for (const [name, node] of [["container", el], ["textarea", textarea]] as const) {
-      if (!node) continue
-      node.addEventListener(
-        "keydown",
-        (event) => {
-          const e = event as KeyboardEvent
-          log.push({
-            target: e.target === textarea ? "textarea" : e.target === el ? "container" : String(e.target),
-            currentTarget: name,
-            key: e.key,
-            code: e.code,
-            ctrlKey: e.ctrlKey,
-            metaKey: e.metaKey,
-            defaultPrevented: e.defaultPrevented,
-            phase: e.eventPhase,
-            activeElement: document.activeElement === textarea ? "textarea" : document.activeElement === el ? "container" : document.activeElement?.tagName ?? "null",
-          })
-        },
-        true,
-      )
-    }
-    ;(window as any).__keydownLog = log
-    // Save references for identity verification in the dispatch evaluate
-    ;(window as any).__instrumentedTextarea = textarea
-    ;(window as any).__instrumentedContainer = el
-  })
-
-  // On macOS, Meta+Backspace maps to \x15 via terminalKeyInput. On Linux/Windows,
-  // Control+u maps to \x15 via the same handler. Headless Chromium intercepts
-  // Control+u at the browser process level before any DOM event fires, so
-  // page.keyboard.press and CDP Input.dispatchKeyEvent both fail to deliver the
-  // keystroke. Dispatch a synthetic KeyboardEvent directly to the focused
-  // textarea via page.evaluate — this exercises the same attachCustomKeyEventHandler
-  // → terminalKeyInput → t.input("\x15", true) code path that fires in
-  // production headed browsers.
+  // On macOS, Meta+Backspace triggers terminalKeyInput which calls
+  // t.input("\x15", true) → dataEmitter.fire → ws.send. On Linux/Windows,
+  // headless Chromium intercepts Control+u before DOM dispatch, and synthetic
+  // dispatchEvent on a contenteditable container is consumed by the browser's
+  // input handling before ghostty's InputHandler fires. Dispatch a synthetic
+  // keydown directly to the container element's registered keydown handlers
+  // by calling dispatchEvent on the container (not the textarea) — matching
+  // the simulateKey pattern from ghostty-web's input-handler.test.ts which
+  // calls registered handlers directly via the container's event listeners.
   if (process.platform === "darwin") {
     await page.keyboard.press("Meta+Backspace")
   } else {
-    const dispatchResult = await terminal.evaluate((el) => {
-      const textarea = el.querySelector("textarea")
-      // Intercept WebSocket.send to detect if data reaches the socket
-      const wsSendCalls: Array<{ data: string; readyState: number }> = []
-      const origSend = WebSocket.prototype.send
-      WebSocket.prototype.send = function (this: WebSocket, data: string | ArrayBufferLike | Blob | ArrayBufferView) {
-        wsSendCalls.push({ data: String(data), readyState: this.readyState })
-        return origSend.call(this, data)
-      }
-      const instrumentedTextarea = (window as any).__instrumentedTextarea as HTMLTextAreaElement | undefined
-      const instrumentedContainer = (window as any).__instrumentedContainer as HTMLElement | undefined
-      const diag: Record<string, unknown> = {
-        textareaExists: !!textarea,
-        textareaParentIsContainer: textarea?.parentElement === el,
-        containerDataComponent: el.getAttribute("data-component"),
-        activeElementBeforeDispatch: document.activeElement === textarea ? "textarea" : document.activeElement === el ? "container" : document.activeElement?.tagName ?? "null",
-        keydownLogRef: Array.isArray((window as any).__keydownLog),
-        keydownLogLengthBefore: ((window as any).__keydownLog as unknown[])?.length ?? -1,
-        terminalElementCount: document.querySelectorAll('[data-component="terminal"]').length,
-        // Identity verification: detect if textarea/container re-mounted between evaluates
-        textareaSameAsInstrumented: textarea === instrumentedTextarea,
-        containerSameAsInstrumented: el === instrumentedContainer,
-        instrumentedTextareaConnected: instrumentedTextarea?.isConnected ?? null,
-        instrumentedContainerConnected: instrumentedContainer?.isConnected ?? null,
-        currentTextareaConnected: textarea?.isConnected ?? null,
-      }
-      if (!textarea) {
-        WebSocket.prototype.send = origSend
-        return { ...diag, error: "textarea not found", dispatched: false, wsSendCalls }
-      }
-      try {
-        const event = new KeyboardEvent("keydown", {
+    await terminal.evaluate((el) => {
+      // Dispatch to the container element where ghostty's InputHandler
+      // registered its keydown listener (InputHandler constructor passes
+      // the parent element, which is the [data-component="terminal"] div).
+      el.dispatchEvent(
+        new KeyboardEvent("keydown", {
           key: "u",
           code: "KeyU",
           ctrlKey: true,
-          bubbles: true,
+          bubbles: false,
           cancelable: true,
-        })
-        const result = textarea.dispatchEvent(event)
-        WebSocket.prototype.send = origSend
-        return {
-          ...diag,
-          dispatched: true,
-          dispatchReturnValue: result,
-          defaultPrevented: event.defaultPrevented,
-          keydownLogLengthAfter: ((window as any).__keydownLog as unknown[])?.length ?? -1,
-          wsSendCalls,
-        }
-      } catch (err) {
-        WebSocket.prototype.send = origSend
-        return { ...diag, dispatched: false, error: String(err), wsSendCalls }
-      }
+        }),
+      )
     })
-    console.log("dispatchEvent diagnostics:", JSON.stringify(dispatchResult, null, 2))
   }
-
-  // Read instrumentation before the assertion so we get diagnostics on failure
-  const keydownLog = await page.evaluate(() => (window as any).__keydownLog ?? [])
-  console.log("keydown instrumentation:", JSON.stringify(keydownLog, null, 2))
 
   await expect.poll(() => ptyInput.join("")).toBe("\x15")
 })

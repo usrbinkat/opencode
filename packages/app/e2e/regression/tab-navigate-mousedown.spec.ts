@@ -150,6 +150,34 @@ test("mobile drawer exposes close controls and navigates between tabs", async ({
     await page.setViewportSize({ width: 1280, height: 720 })
     await expect(tabA.locator("[data-titlebar-tab]")).toHaveAttribute("data-title-overflow", "false")
     await page.setViewportSize({ width: 450, height: 720 })
+
+    // Instrument: capture drawer overlay state before click to diagnose
+    // corvu drawer overlay intercepting pointer events after viewport resize
+    const overlayState = await page.evaluate(() => {
+      const overlays = [...document.querySelectorAll("[data-corvu-drawer-overlay]")]
+      const drawers = [...document.querySelectorAll("[data-corvu-drawer-content]")]
+      return {
+        overlayCount: overlays.length,
+        overlays: overlays.map((o) => ({
+          open: o.getAttribute("data-open"),
+          closing: o.getAttribute("data-closing"),
+          transitioning: o.getAttribute("data-transitioning"),
+          pointerEvents: getComputedStyle(o).pointerEvents,
+          display: getComputedStyle(o).display,
+          visibility: getComputedStyle(o).visibility,
+          rect: JSON.stringify(o.getBoundingClientRect()),
+        })),
+        drawerCount: drawers.length,
+        drawers: drawers.map((d) => ({
+          open: d.getAttribute("data-open"),
+          closing: d.getAttribute("data-closing"),
+          transitioning: d.getAttribute("data-transitioning"),
+          hidden: d.getAttribute("aria-hidden"),
+        })),
+      }
+    })
+    console.log(`drawer overlay state before Tabs click (${direction}):`, JSON.stringify(overlayState, null, 2))
+
     await page.getByRole("button", { name: "Tabs", exact: true }).click()
   }
 })

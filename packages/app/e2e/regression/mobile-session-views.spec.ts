@@ -118,6 +118,39 @@ for (const position of ["top", "bottom"] as const) {
     await expect(details.getByRole("button", { name: "No changes", exact: true })).toBeVisible()
     await expect(details).not.toHaveAttribute("data-transitioning")
     await page.keyboard.press("Escape")
+
+    // Instrument: capture drawer/overlay lifecycle state after Escape to diagnose
+    // corvu drawer dismiss stalls where data-open persists after animation
+    const drawerState = await page.evaluate(() => {
+      const log: Array<{ ms: number; details: Record<string, string | null>; overlays: Array<Record<string, string | null>> }> = []
+      const start = performance.now()
+      const sample = () => {
+        const details = document.querySelector('[role="dialog"][aria-labelledby]')
+        const overlays = [...document.querySelectorAll("[data-corvu-drawer-overlay]")]
+        log.push({
+          ms: Math.round(performance.now() - start),
+          details: details ? {
+            open: details.getAttribute("data-open"),
+            closing: details.getAttribute("data-closing"),
+            transitioning: details.getAttribute("data-transitioning"),
+            hidden: details.getAttribute("aria-hidden"),
+            visible: String(details.getBoundingClientRect().height > 0),
+          } : { missing: "true" },
+          overlays: overlays.map((o) => ({
+            open: o.getAttribute("data-open"),
+            closing: o.getAttribute("data-closing"),
+            transitioning: o.getAttribute("data-transitioning"),
+            pointerEvents: getComputedStyle(o).pointerEvents,
+            height: String(o.getBoundingClientRect().height),
+          })),
+        })
+      }
+      sample()
+      ;[50, 100, 200, 500, 1000].forEach((delay) => setTimeout(sample, delay))
+      return new Promise<typeof log>((resolve) => setTimeout(() => { sample(); resolve(log) }, 1200))
+    })
+    console.log("drawer lifecycle after Escape:", JSON.stringify(drawerState, null, 2))
+
     await expect(details).toBeHidden()
     await expect(more).toBeFocused()
     await more.click()
