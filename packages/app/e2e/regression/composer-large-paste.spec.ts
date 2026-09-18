@@ -88,6 +88,28 @@ for (const lines of [6000, 25000]) {
 }
 
 async function expectCaretVisible(input: Locator) {
+  // Log diagnostic state before the poll so failures have visibility
+  const diag = await input.evaluate((element) => {
+    const selection = window.getSelection()
+    const scrollable = element.closest("[data-scrollable]") ?? element
+    const caret = selection?.rangeCount ? selection.getRangeAt(0).getBoundingClientRect() : null
+    const viewport = scrollable.getBoundingClientRect()
+    return {
+      hasSelection: !!selection,
+      isCollapsed: selection?.isCollapsed ?? null,
+      rangeCount: selection?.rangeCount ?? 0,
+      containsAnchor: selection?.anchorNode ? element.contains(selection.anchorNode) : null,
+      caretHeight: caret?.height ?? null,
+      caretTop: caret?.top ?? null,
+      caretBottom: caret?.bottom ?? null,
+      viewportTop: viewport.top,
+      viewportBottom: viewport.bottom,
+      scrollTop: scrollable instanceof HTMLElement ? scrollable.scrollTop : null,
+      scrollHeight: scrollable instanceof HTMLElement ? scrollable.scrollHeight : null,
+    }
+  })
+  console.log("expectCaretVisible state:", JSON.stringify(diag))
+
   await expect
     .poll(() =>
       input.evaluate((element) => {

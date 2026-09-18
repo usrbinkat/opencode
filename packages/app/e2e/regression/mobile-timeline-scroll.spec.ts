@@ -230,6 +230,18 @@ for (const device of ["Pixel 7", "iPhone 13"]) {
             .poll(() => row.evaluate((element) => element.getBoundingClientRect().height))
             .toBe(heights[index] + 600)
         }
+        // Instrument: capture scroll state after images load during held touch
+        const afterImageLoad = await reading.scroller.evaluate((root, anchorText) => {
+          const anchor = [...root.querySelectorAll("p")].find((p) => p.textContent?.includes(anchorText))
+          return {
+            scrollTop: root.scrollTop,
+            scrollHeight: root.scrollHeight,
+            anchorTop: anchor?.getBoundingClientRect().top ?? null,
+            viewportTop: root.getBoundingClientRect().top,
+          }
+        }, "Part 2 line 0.")
+        console.log(`image-anchor after ${imageCount} images loaded:`, JSON.stringify(afterImageLoad))
+
         await testInfo.attach("images-held.png", { body: await page.screenshot(), contentType: "image/png" })
         expect(await reading.anchor.evaluate((element) => element.getBoundingClientRect().top)).toBeCloseTo(before, 0)
         for (let step = 1; step <= 21; step++) {
@@ -243,6 +255,19 @@ for (const device of ["Pixel 7", "iPhone 13"]) {
         }
         await devtools.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] })
         await expect(reading.timeline.locator('[data-orientation="vertical"][data-visible="false"]')).toHaveCount(1)
+
+        // Instrument: capture scroll state after touch release to diagnose anchor drift
+        const afterRelease = await reading.scroller.evaluate((root, anchorText) => {
+          const anchor = [...root.querySelectorAll("p")].find((p) => p.textContent?.includes(anchorText))
+          return {
+            scrollTop: root.scrollTop,
+            scrollHeight: root.scrollHeight,
+            anchorTop: anchor?.getBoundingClientRect().top ?? null,
+            expected: null as number | null,
+          }
+        }, "Part 2 line 0.")
+        console.log(`image-anchor after touchEnd (${imageCount} images):`, JSON.stringify({ ...afterRelease, before, expectedFinal: before + 615 }))
+
         expect(await reading.anchor.evaluate((element) => element.getBoundingClientRect().top)).toBeCloseTo(
           before + 615,
           0,
