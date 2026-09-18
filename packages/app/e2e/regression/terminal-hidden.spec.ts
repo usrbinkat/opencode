@@ -125,7 +125,7 @@ test("animates review and terminal panels while caching hidden terminal content"
   await expectHeightMotions(page, "session-side-region", 1)
   await expectHeightMotions(page, "session-side-terminal-region", 1)
   await expectStackedGeometry(page)
-  await expectPanelGapHeld(page)
+  await expectPanelGapHeld(page, "line128-after-terminal-open-stacked")
 
   await resetTerminalBottomMotion(page)
   await resetTerminalAnchorGaps(page)
@@ -174,7 +174,7 @@ test("animates review and terminal panels while caching hidden terminal content"
   })
   console.log("layout state before second expectPanelGapHeld:", JSON.stringify(gapState, null, 2))
 
-  await expectPanelGapHeld(page)
+  await expectPanelGapHeld(page, "line177-after-review-close-terminal-visible")
   await reviewToggle.click()
   await expect(page.locator("#review-panel")).toBeVisible()
   await expect(reviewContent).toHaveAttribute("data-cache-probe", "original")
@@ -191,7 +191,7 @@ test("animates review and terminal panels while caching hidden terminal content"
   await expect(terminalContent).toHaveAttribute("data-cache-probe", "original")
   await expectTerminalContentCachedSize(page)
   await expectStackPainted(page)
-  await expectPanelGapHeld(page)
+  await expectPanelGapHeld(page, "line194-after-terminal-close-review-visible")
   await expect(page.locator('[data-slot="session-side-panel-gap"]')).toHaveCSS("height", "0px")
 
   await reviewToggle.click()
@@ -522,15 +522,21 @@ async function resetPanelGaps(page: Page) {
   })
 }
 
-async function expectPanelGapHeld(page: Page) {
+async function expectPanelGapHeld(page: Page, caller: string) {
   const observerLog = await page.evaluate(
     () => (window as Window & { __panelMotion?: MotionProbe }).__panelMotion?.panelGapObserverLog ?? [],
   )
-  console.log("panelGap observer log:", JSON.stringify(observerLog.slice(-20), null, 2))
+  console.log(`panelGap observer log [${caller}]:`, JSON.stringify(observerLog.slice(-20), null, 2))
   // Wait for the gap transition to settle (40ms duration + margin), then assert
   // the settled height. The previous ratio-based assertion sampled intermediate
   // animation frames and was sensitive to compositor timing on GHA runners.
   const gap = page.locator('[data-slot="session-side-panel-gap"]')
+  const currentHeight = await gap.evaluate((el) => ({
+    rect: el.getBoundingClientRect().height,
+    style: el.style.height,
+    computed: getComputedStyle(el).height,
+  }))
+  console.log(`panelGap current state [${caller}]:`, JSON.stringify(currentHeight))
   await expect
     .poll(() => gap.evaluate((el) => el.getBoundingClientRect().height), { timeout: 5_000 })
     .toBeGreaterThanOrEqual(7)

@@ -141,17 +141,26 @@ test("clears the terminal line with Command+Delete", async ({ page }) => {
   } else {
     const dispatchResult = await terminal.evaluate((el) => {
       const textarea = el.querySelector("textarea")
+      // Intercept WebSocket.send to detect if data reaches the socket
+      const wsSendCalls: Array<{ data: string; readyState: number }> = []
+      const origSend = WebSocket.prototype.send
+      WebSocket.prototype.send = function (this: WebSocket, data: string | ArrayBufferLike | Blob | ArrayBufferView) {
+        wsSendCalls.push({ data: String(data), readyState: this.readyState })
+        return origSend.call(this, data)
+      }
       const diag: Record<string, unknown> = {
         textareaExists: !!textarea,
         textareaParentIsContainer: textarea?.parentElement === el,
-        textareaTag: textarea?.tagName,
-        containerTag: el.tagName,
         containerDataComponent: el.getAttribute("data-component"),
         activeElementBeforeDispatch: document.activeElement === textarea ? "textarea" : document.activeElement === el ? "container" : document.activeElement?.tagName ?? "null",
         keydownLogRef: Array.isArray((window as any).__keydownLog),
         keydownLogLengthBefore: ((window as any).__keydownLog as unknown[])?.length ?? -1,
+        terminalElementCount: document.querySelectorAll('[data-component="terminal"]').length,
       }
-      if (!textarea) return { ...diag, error: "textarea not found", dispatched: false }
+      if (!textarea) {
+        WebSocket.prototype.send = origSend
+        return { ...diag, error: "textarea not found", dispatched: false, wsSendCalls }
+      }
       try {
         const event = new KeyboardEvent("keydown", {
           key: "u",
@@ -161,15 +170,18 @@ test("clears the terminal line with Command+Delete", async ({ page }) => {
           cancelable: true,
         })
         const result = textarea.dispatchEvent(event)
+        WebSocket.prototype.send = origSend
         return {
           ...diag,
           dispatched: true,
           dispatchReturnValue: result,
           defaultPrevented: event.defaultPrevented,
           keydownLogLengthAfter: ((window as any).__keydownLog as unknown[])?.length ?? -1,
+          wsSendCalls,
         }
       } catch (err) {
-        return { ...diag, dispatched: false, error: String(err) }
+        WebSocket.prototype.send = origSend
+        return { ...diag, dispatched: false, error: String(err), wsSendCalls }
       }
     })
     console.log("dispatchEvent diagnostics:", JSON.stringify(dispatchResult, null, 2))

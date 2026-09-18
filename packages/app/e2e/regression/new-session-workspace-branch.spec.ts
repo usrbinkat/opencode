@@ -63,31 +63,55 @@ test("selects a base branch for a new workspace", async ({ page }) => {
   await expect(search).toHaveValue("")
   await expect(page.getByRole("menuitemradio", { name: "feature/api", exact: true })).toBeChecked()
 
-  // Instrument: capture focusin events on the composer to detect what steals focus
-  await page.evaluate(() => {
+  // Instrument: capture focusin on composer AND blur on the branch trigger to detect focus theft
+  await page.evaluate((buttonName) => {
     const composer = document.querySelector('[data-component="composer-editor"]')
-    if (!composer) return
-    const log: Array<{
+    const btn = [...document.querySelectorAll("button")].find((b) => b.textContent?.includes(buttonName))
+    const focusInLog: Array<{
       ms: number
+      type: string
+      element: string
       relatedTargetTag: string
       relatedTargetId: string
       relatedTargetRole: string
       relatedTargetText: string
     }> = []
     const start = performance.now()
-    composer.addEventListener("focusin", (event) => {
-      const fe = event as FocusEvent
-      const rt = fe.relatedTarget as HTMLElement | null
-      log.push({
+    const record = (type: string, element: string, rt: HTMLElement | null) => {
+      focusInLog.push({
         ms: Math.round(performance.now() - start),
+        type,
+        element,
         relatedTargetTag: rt?.tagName ?? "null",
         relatedTargetId: rt?.id ?? "",
         relatedTargetRole: rt?.getAttribute("role") ?? "",
         relatedTargetText: rt?.textContent?.slice(0, 40) ?? "",
       })
+    }
+    if (composer) {
+      composer.addEventListener("focusin", (event) => {
+        const fe = event as FocusEvent
+        record("composer-focusin", "composer", fe.relatedTarget as HTMLElement | null)
+      })
+    }
+    if (btn) {
+      btn.addEventListener("blur", (event) => {
+        const fe = event as FocusEvent
+        record("trigger-blur", "trigger", fe.relatedTarget as HTMLElement | null)
+      })
+      btn.addEventListener("focus", () => {
+        record("trigger-focus", "trigger", null)
+      })
+    }
+    // Also capture document-level focus changes
+    document.addEventListener("focusin", (event) => {
+      const fe = event as FocusEvent
+      const target = fe.target as HTMLElement | null
+      if (target === composer || target === btn) return // already captured above
+      record("document-focusin", target?.tagName ?? "unknown", fe.relatedTarget as HTMLElement | null)
     })
-    ;(window as any).__composerFocusInLog = log
-  })
+    ;(window as any).__composerFocusInLog = focusInLog
+  }, "from feature/api")
 
   await page.keyboard.press("Escape")
 

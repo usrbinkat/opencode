@@ -550,7 +550,21 @@ async function expectCanScrollToStart(
     current = await timelineState(page)
     if (!changed && current.signature === before.signature && current.scrollTop <= 1) unchangedAtTop++
     else unchangedAtTop = 0
-    if (unchangedAtTop >= 2) break
+    if (unchangedAtTop >= 2) {
+      console.log(
+        `scroll traversal exited early: attempt=${attempt}, unchangedAtTop=${unchangedAtTop}, ` +
+          `scrollTop=${current.scrollTop}, seenParts=${seenParts.size}/${expectedPartIDs.length}, ` +
+          `seenMessages=${seenMessages.size}/${expectedMessageIDs.length}, changed=${changed}`,
+      )
+      break
+    }
+    if (attempt === 799) {
+      console.log(
+        `scroll traversal hit 800 iteration limit: scrollTop=${current.scrollTop}, ` +
+          `seenParts=${seenParts.size}/${expectedPartIDs.length}, ` +
+          `seenMessages=${seenMessages.size}/${expectedMessageIDs.length}`,
+      )
+    }
   }
 
   collectSeen(current, seenParts, seenMessages)
