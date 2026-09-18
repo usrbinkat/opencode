@@ -590,6 +590,52 @@ async function expectCanScrollToStart(
     await page.waitForTimeout(16)
   }
 
+  // Second pass: the upward traversal may skip middle items when the 300px
+  // scroll step lands between two overscan windows. If parts are still missing
+  // after reaching the top, scroll down through the timeline with real wheel
+  // events (matching the established pattern — no direct scrollTop writes after
+  // the virtualizer has been unpinned) to mount items the first pass missed,
+  // then scroll back up to the top.
+  if (seenParts.size < expectedPartIDs.length || seenMessages.size < expectedMessageIDs.length) {
+    console.log(
+      `second pass needed: seenParts=${seenParts.size}/${expectedPartIDs.length}, ` +
+        `seenMessages=${seenMessages.size}/${expectedMessageIDs.length}`,
+    )
+    // Scroll downward with smaller steps to cover the gaps the first pass skipped.
+    let pass2Complete = false
+    for (let pass2 = 0; pass2 < 800; pass2++) {
+      if (seenParts.size >= expectedPartIDs.length && seenMessages.size >= expectedMessageIDs.length) {
+        console.log(
+          `second pass completed at step=${pass2}, seenParts=${seenParts.size}/${expectedPartIDs.length}, ` +
+            `scrollTop=${current.scrollTop}/${current.scrollHeight}`,
+        )
+        pass2Complete = true
+        break
+      }
+      await page.mouse.wheel(0, 200)
+      await page.waitForTimeout(32)
+      current = await timelineState(page)
+      collectSeen(current, seenParts, seenMessages)
+    }
+    if (!pass2Complete) {
+      console.log(
+        `second pass exhausted 800 steps: seenParts=${seenParts.size}/${expectedPartIDs.length}, ` +
+          `seenMessages=${seenMessages.size}/${expectedMessageIDs.length}, ` +
+          `scrollTop=${current.scrollTop}/${current.scrollHeight}, ` +
+          `missing=${expectedPartIDs.filter((id) => !seenParts.has(id)).join(",")}`,
+      )
+    }
+
+    // Scroll back to the top for the final assertion.
+    for (let ret = 0; ret < 800; ret++) {
+      if (current.scrollTop <= 1) break
+      await page.mouse.wheel(0, -300)
+      await page.waitForTimeout(16)
+      current = await timelineState(page)
+      collectSeen(current, seenParts, seenMessages)
+    }
+  }
+
   collectSeen(current, seenParts, seenMessages)
   samples.push(sampleTraversal(current, seenParts.size, seenMessages.size))
   expectCompleteScroll(current, expectedPartIDs, expectedMessageIDs, seenParts, seenMessages, samples, exit)
