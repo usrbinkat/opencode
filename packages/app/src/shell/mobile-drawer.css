@@ -43,18 +43,6 @@
   pointer-events: none;
 }
 
-/* Stale forceMount portals survive component unmount/remount cycles across
-   viewport resize. The overlay retains data-open="" from the last render
-   while the drawer's internal state is gone. @corvu/dialog Overlay applies
-   pointer-events: auto as an inline style (combineStyle in Overlay.tsx),
-   so !important is required to override it from CSS. */
-[data-slot="mobile-drawer-overlay"][aria-hidden="true"] {
-  pointer-events: none !important;
-}
-
-[data-slot="mobile-drawer-overlay"][data-closed] {
-  pointer-events: none !important;
-}
 
 [data-slot="mobile-drawer-handle"] {
   display: flex;

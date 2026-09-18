@@ -616,14 +616,15 @@ async function expectCanScrollToStart(
       )
     }
 
-    // Scroll back to the top for the final assertion.
-    for (let ret = 0; ret < 800; ret++) {
-      if (current.scrollTop <= 1) break
-      await page.mouse.wheel(0, -300)
-      await page.waitForTimeout(16)
-      current = await timelineState(page)
-      collectSeen(current, seenParts, seenMessages)
-    }
+    // Jump to the top for the final assertion. Home key navigates the
+    // virtualizer to scrollTop=0 in one frame via handleListKeyDown,
+    // avoiding the 800-iteration polling loop that exceeded the 240s
+    // test timeout on the prior CI run.
+    const scroller = timelineScroller(page)
+    await scroller.press("Home")
+    await page.waitForTimeout(100)
+    current = await timelineState(page)
+    collectSeen(current, seenParts, seenMessages)
   }
 
   collectSeen(current, seenParts, seenMessages)
