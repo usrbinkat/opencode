@@ -140,6 +140,40 @@ test("animates review and terminal panels while caching hidden terminal content"
   await expectHeightMotions(page, "session-side-terminal-region", 2)
   await expectTerminalBottomFixed(page)
   await expectTerminalTopAnchored(page)
+
+  // Instrument: capture full layout state before second expectPanelGapHeld call
+  const gapState = await page.evaluate(() => {
+    const gap = document.querySelector<HTMLElement>('[data-slot="session-side-panel-gap"]')
+    const review = document.querySelector<HTMLElement>("#review-panel")
+    const terminal = document.querySelector<HTMLElement>("#terminal-panel")
+    const sideRegion = document.querySelector<HTMLElement>('[data-slot="session-side-region"]')
+    const terminalRegion = document.querySelector<HTMLElement>('[data-slot="session-side-terminal-region"]')
+    const sidePresence = document.querySelector<HTMLElement>('[data-slot="session-side-panel-presence"]')
+    const sideRegionPresence = document.querySelector<HTMLElement>('[data-slot="session-side-region-presence"]')
+    const sideTerminalPresence = document.querySelector<HTMLElement>('[data-slot="side-terminal-panel-presence"]')
+    return {
+      gapRectHeight: gap?.getBoundingClientRect().height,
+      gapStyleHeight: gap?.style.height,
+      gapComputedHeight: gap ? getComputedStyle(gap).height : null,
+      gapTransitionNone: gap ? getComputedStyle(gap).transitionProperty === "none" || getComputedStyle(gap).transitionDuration === "0s" : null,
+      reviewExists: !!review,
+      reviewHidden: review?.getAttribute("aria-hidden"),
+      reviewRectHeight: review?.getBoundingClientRect().height,
+      terminalHidden: terminal?.getAttribute("aria-hidden"),
+      terminalOpened: terminal?.getAttribute("data-opened"),
+      terminalRectHeight: terminal?.getBoundingClientRect().height,
+      sideRegionStyleHeight: sideRegion?.style.height,
+      sideRegionRectHeight: sideRegion?.getBoundingClientRect().height,
+      terminalRegionStyleHeight: terminalRegion?.style.height,
+      terminalRegionRectHeight: terminalRegion?.getBoundingClientRect().height,
+      sidePresenceOpened: sidePresence?.getAttribute("data-opened"),
+      sidePresenceClassList: sidePresence?.className?.slice(0, 80),
+      sideRegionPresenceOpened: sideRegionPresence?.getAttribute("data-opened"),
+      sideTerminalPresenceOpened: sideTerminalPresence?.getAttribute("data-opened"),
+    }
+  })
+  console.log("layout state before second expectPanelGapHeld:", JSON.stringify(gapState, null, 2))
+
   await expectPanelGapHeld(page)
   await reviewToggle.click()
   await expect(page.locator("#review-panel")).toBeVisible()

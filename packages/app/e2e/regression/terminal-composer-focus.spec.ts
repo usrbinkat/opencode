@@ -139,19 +139,40 @@ test("clears the terminal line with Command+Delete", async ({ page }) => {
   if (process.platform === "darwin") {
     await page.keyboard.press("Meta+Backspace")
   } else {
-    await terminal.evaluate((el) => {
+    const dispatchResult = await terminal.evaluate((el) => {
       const textarea = el.querySelector("textarea")
-      if (!textarea) throw new Error("Terminal textarea not found")
-      textarea.dispatchEvent(
-        new KeyboardEvent("keydown", {
+      const diag: Record<string, unknown> = {
+        textareaExists: !!textarea,
+        textareaParentIsContainer: textarea?.parentElement === el,
+        textareaTag: textarea?.tagName,
+        containerTag: el.tagName,
+        containerDataComponent: el.getAttribute("data-component"),
+        activeElementBeforeDispatch: document.activeElement === textarea ? "textarea" : document.activeElement === el ? "container" : document.activeElement?.tagName ?? "null",
+        keydownLogRef: Array.isArray((window as any).__keydownLog),
+        keydownLogLengthBefore: ((window as any).__keydownLog as unknown[])?.length ?? -1,
+      }
+      if (!textarea) return { ...diag, error: "textarea not found", dispatched: false }
+      try {
+        const event = new KeyboardEvent("keydown", {
           key: "u",
           code: "KeyU",
           ctrlKey: true,
           bubbles: true,
           cancelable: true,
-        }),
-      )
+        })
+        const result = textarea.dispatchEvent(event)
+        return {
+          ...diag,
+          dispatched: true,
+          dispatchReturnValue: result,
+          defaultPrevented: event.defaultPrevented,
+          keydownLogLengthAfter: ((window as any).__keydownLog as unknown[])?.length ?? -1,
+        }
+      } catch (err) {
+        return { ...diag, dispatched: false, error: String(err) }
+      }
     })
+    console.log("dispatchEvent diagnostics:", JSON.stringify(dispatchResult, null, 2))
   }
 
   // Read instrumentation before the assertion so we get diagnostics on failure

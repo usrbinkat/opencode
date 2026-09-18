@@ -62,6 +62,33 @@ test("selects a base branch for a new workspace", async ({ page }) => {
   await expect(search).toBeFocused()
   await expect(search).toHaveValue("")
   await expect(page.getByRole("menuitemradio", { name: "feature/api", exact: true })).toBeChecked()
+
+  // Instrument: capture focusin events on the composer to detect what steals focus
+  await page.evaluate(() => {
+    const composer = document.querySelector('[data-component="composer-editor"]')
+    if (!composer) return
+    const log: Array<{
+      ms: number
+      relatedTargetTag: string
+      relatedTargetId: string
+      relatedTargetRole: string
+      relatedTargetText: string
+    }> = []
+    const start = performance.now()
+    composer.addEventListener("focusin", (event) => {
+      const fe = event as FocusEvent
+      const rt = fe.relatedTarget as HTMLElement | null
+      log.push({
+        ms: Math.round(performance.now() - start),
+        relatedTargetTag: rt?.tagName ?? "null",
+        relatedTargetId: rt?.id ?? "",
+        relatedTargetRole: rt?.getAttribute("role") ?? "",
+        relatedTargetText: rt?.textContent?.slice(0, 40) ?? "",
+      })
+    })
+    ;(window as any).__composerFocusInLog = log
+  })
+
   await page.keyboard.press("Escape")
 
   // Instrument: track activeElement over time after Escape to detect focus theft
@@ -114,6 +141,8 @@ test("selects a base branch for a new workspace", async ({ page }) => {
     "from feature/api",
   )
   console.log("focus trace after Escape:", JSON.stringify(focusTrace, null, 2))
+  const composerFocusInLog = await page.evaluate(() => (window as any).__composerFocusInLog ?? [])
+  console.log("composer focusin events:", JSON.stringify(composerFocusInLog, null, 2))
 
   await expect.poll(() => selected.evaluate((el) => document.activeElement === el), { timeout: 10_000 }).toBe(true)
   await page.keyboard.press("Enter")
