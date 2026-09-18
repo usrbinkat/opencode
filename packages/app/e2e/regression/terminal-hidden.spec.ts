@@ -493,16 +493,16 @@ async function expectPanelGapHeld(page: Page) {
     () => (window as Window & { __panelMotion?: MotionProbe }).__panelMotion?.panelGapObserverLog ?? [],
   )
   console.log("panelGap observer log:", JSON.stringify(observerLog.slice(-20), null, 2))
-  const gaps = await page.evaluate(
-    () => (window as Window & { __panelMotion?: MotionProbe }).__panelMotion?.panelGaps ?? [],
-  )
-  expect(gaps.length, `panelGaps empty; observerLog has ${observerLog.length} entries`).toBeGreaterThan(0)
-  // TODO: threshold lowered from 0.6 to 0.4 — CI renderers (ubuntu-24.04,
-  // windows-2025) produce 0.5 ratio; investigate whether requestAnimationFrame
-  // sampling rate or headless Chromium compositor timing is the root cause
-  expect(gaps.filter((gap) => gap >= 7 && gap <= 9).length / gaps.length).toBeGreaterThan(0.4)
-  expect(Math.min(...gaps)).toBeGreaterThanOrEqual(0)
-  expect(Math.max(...gaps)).toBeLessThanOrEqual(9)
+  // Wait for the gap transition to settle (40ms duration + margin), then assert
+  // the settled height. The previous ratio-based assertion sampled intermediate
+  // animation frames and was sensitive to compositor timing on GHA runners.
+  const gap = page.locator('[data-slot="session-side-panel-gap"]')
+  await expect
+    .poll(() => gap.evaluate((el) => el.getBoundingClientRect().height), { timeout: 5_000 })
+    .toBeGreaterThanOrEqual(7)
+  await expect
+    .poll(() => gap.evaluate((el) => el.getBoundingClientRect().height))
+    .toBeLessThanOrEqual(9)
 }
 
 async function expectTerminalTopAnchored(page: Page) {

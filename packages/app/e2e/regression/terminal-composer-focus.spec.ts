@@ -129,29 +129,29 @@ test("clears the terminal line with Command+Delete", async ({ page }) => {
   })
 
   // On macOS, Meta+Backspace maps to \x15 via terminalKeyInput. On Linux/Windows,
-  // Control+u produces \x15 via ghostty's key encoder — but headless Chromium
-  // intercepts Control+u as a browser shortcut before DOM dispatch. Use CDP
-  // Input.dispatchKeyEvent with rawKeyDown to bypass browser shortcut interception
-  // while still exercising the same application keydown handler code path.
+  // Control+u maps to \x15 via the same handler. Headless Chromium intercepts
+  // Control+u at the browser process level before any DOM event fires, so
+  // page.keyboard.press and CDP Input.dispatchKeyEvent both fail to deliver the
+  // keystroke. Dispatch a synthetic KeyboardEvent directly to the focused
+  // textarea via page.evaluate — this exercises the same attachCustomKeyEventHandler
+  // → terminalKeyInput → t.input("\x15", true) code path that fires in
+  // production headed browsers.
   if (process.platform === "darwin") {
     await page.keyboard.press("Meta+Backspace")
   } else {
-    const devtools = await page.context().newCDPSession(page)
-    await devtools.send("Input.dispatchKeyEvent", {
-      type: "rawKeyDown",
-      key: "u",
-      code: "KeyU",
-      windowsVirtualKeyCode: 85,
-      modifiers: 2, // Ctrl
+    await terminal.evaluate((el) => {
+      const textarea = el.querySelector("textarea")
+      if (!textarea) throw new Error("Terminal textarea not found")
+      textarea.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "u",
+          code: "KeyU",
+          ctrlKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      )
     })
-    await devtools.send("Input.dispatchKeyEvent", {
-      type: "keyUp",
-      key: "u",
-      code: "KeyU",
-      windowsVirtualKeyCode: 85,
-      modifiers: 2,
-    })
-    await devtools.detach()
   }
 
   // Read instrumentation before the assertion so we get diagnostics on failure
