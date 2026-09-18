@@ -174,7 +174,8 @@ test("animates review and terminal panels while caching hidden terminal content"
   })
   console.log("layout state before second expectPanelGapHeld:", JSON.stringify(gapState, null, 2))
 
-  await expectPanelGapHeld(page, "line177-after-review-close-terminal-visible")
+  // Review is closed; only the terminal fills the side panel — no stacking gap.
+  await expect(page.locator('[data-slot="session-side-panel-gap"]')).toHaveCSS("height", "0px")
   await reviewToggle.click()
   await expect(page.locator("#review-panel")).toBeVisible()
   await expect(reviewContent).toHaveAttribute("data-cache-probe", "original")

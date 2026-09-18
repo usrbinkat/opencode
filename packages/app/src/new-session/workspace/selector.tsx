@@ -6,6 +6,7 @@ import { Tooltip } from "@opencode/ui/tooltip"
 import { Icon } from "@opencode/ui/icon"
 import { getFilename } from "@opencode/util/path"
 import { useLanguage } from "@/runtime/i18n/language"
+import { createMenuDismissController } from "@/shell/commands/menu-dismiss"
 import { sameDirectory } from "@/workspaces/paths"
 
 export function PromptWorkspaceSelector(props: {
@@ -31,6 +32,11 @@ export function PromptWorkspaceSelector(props: {
   let searchInput: HTMLInputElement | undefined
   let branchSearchInput: HTMLInputElement | undefined
   let branchTriggerRef: HTMLButtonElement | undefined
+  let branchContentRef: HTMLDivElement | undefined
+  const branchDismiss = createMenuDismissController(
+    () => branchContentRef,
+    () => branchTriggerRef,
+  )
   let focusSearch = false
   const branchTruncation = createTruncatedText()
   const focusWorktreeSearch = () =>
@@ -301,19 +307,15 @@ export function PromptWorkspaceSelector(props: {
             </Menu.Trigger>
             <Menu.Portal>
               <Menu.Content
+                ref={(element: HTMLDivElement) => (branchContentRef = element)}
                 class="w-[243px] overflow-hidden rounded-md border-0 bg-v2-background-bg-layer-01 shadow-[var(--v2-elevation-floating)] focus:outline-none"
                 onOpenAutoFocus={(event) => {
                   event.preventDefault()
+                  branchDismiss.allowTriggerRestore()
                   // Kobalte defers its list autofocus until after the focus scope opens.
                   setTimeout(() => requestAnimationFrame(() => branchSearchInput?.focus({ preventScroll: true })))
                 }}
-                onCloseAutoFocus={(event) => {
-                  // Kobalte's focus-scope restoration is deferred and unreliable in
-                  // headless environments where the browser window lacks OS focus.
-                  // Explicitly return focus to the trigger for keyboard navigation.
-                  event.preventDefault()
-                  branchTriggerRef?.focus()
-                }}
+                onCloseAutoFocus={branchDismiss.onCloseAutoFocus}
               >
                 <div class="flex h-7 shrink-0 items-center gap-2 rounded-sm pl-3 pr-2.5 text-v2-icon-icon-muted">
                   <Icon name="magnifying-glass" size="small" class="shrink-0" />

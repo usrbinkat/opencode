@@ -126,6 +126,9 @@ test("clears the terminal line with Command+Delete", async ({ page }) => {
       )
     }
     ;(window as any).__keydownLog = log
+    // Save references for identity verification in the dispatch evaluate
+    ;(window as any).__instrumentedTextarea = textarea
+    ;(window as any).__instrumentedContainer = el
   })
 
   // On macOS, Meta+Backspace maps to \x15 via terminalKeyInput. On Linux/Windows,
@@ -148,6 +151,8 @@ test("clears the terminal line with Command+Delete", async ({ page }) => {
         wsSendCalls.push({ data: String(data), readyState: this.readyState })
         return origSend.call(this, data)
       }
+      const instrumentedTextarea = (window as any).__instrumentedTextarea as HTMLTextAreaElement | undefined
+      const instrumentedContainer = (window as any).__instrumentedContainer as HTMLElement | undefined
       const diag: Record<string, unknown> = {
         textareaExists: !!textarea,
         textareaParentIsContainer: textarea?.parentElement === el,
@@ -156,6 +161,12 @@ test("clears the terminal line with Command+Delete", async ({ page }) => {
         keydownLogRef: Array.isArray((window as any).__keydownLog),
         keydownLogLengthBefore: ((window as any).__keydownLog as unknown[])?.length ?? -1,
         terminalElementCount: document.querySelectorAll('[data-component="terminal"]').length,
+        // Identity verification: detect if textarea/container re-mounted between evaluates
+        textareaSameAsInstrumented: textarea === instrumentedTextarea,
+        containerSameAsInstrumented: el === instrumentedContainer,
+        instrumentedTextareaConnected: instrumentedTextarea?.isConnected ?? null,
+        instrumentedContainerConnected: instrumentedContainer?.isConnected ?? null,
+        currentTextareaConnected: textarea?.isConnected ?? null,
       }
       if (!textarea) {
         WebSocket.prototype.send = origSend
@@ -238,7 +249,26 @@ test("routes typing to the composer unless the open terminal is focused", async 
 
   await page.waitForTimeout(300)
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+
+  // Instrument: capture activeElement before and after typing to diagnose focus routing
+  const beforeType = await page.evaluate(() => ({
+    tag: document.activeElement?.tagName ?? "null",
+    role: document.activeElement?.getAttribute("role") ?? "",
+    id: document.activeElement?.id ?? "",
+    className: document.activeElement?.className?.slice(0, 60) ?? "",
+  }))
+  console.log("activeElement before type:", JSON.stringify(beforeType))
+
   await page.keyboard.type("a")
+
+  const afterType = await page.evaluate(() => ({
+    tag: document.activeElement?.tagName ?? "null",
+    role: document.activeElement?.getAttribute("role") ?? "",
+    id: document.activeElement?.id ?? "",
+    className: document.activeElement?.className?.slice(0, 60) ?? "",
+    composerText: document.querySelector('[data-component="composer-editor"]')?.textContent ?? "",
+  }))
+  console.log("activeElement after type:", JSON.stringify(afterType))
 
   await expect.poll(() => composer.evaluate((el) => document.activeElement === el), { timeout: 10_000 }).toBe(true)
   await expect(composer).toHaveText("a")
