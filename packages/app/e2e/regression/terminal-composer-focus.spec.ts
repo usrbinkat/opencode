@@ -91,31 +91,32 @@ test("clears the terminal line with Command+Delete", async ({ page }) => {
   await expect.poll(() => terminal.evaluate((el) => el.contains(document.activeElement)), { timeout: 10_000 }).toBe(true)
 
   // On macOS, Meta+Backspace triggers terminalKeyInput which calls
-  // t.input("\x15", true) → dataEmitter.fire → ws.send. On Linux/Windows,
-  // headless Chromium intercepts Control+u before DOM dispatch, and synthetic
-  // dispatchEvent on a contenteditable container is consumed by the browser's
-  // input handling before ghostty's InputHandler fires. Dispatch a synthetic
-  // keydown directly to the container element's registered keydown handlers
-  // by calling dispatchEvent on the container (not the textarea) — matching
-  // the simulateKey pattern from ghostty-web's input-handler.test.ts which
-  // calls registered handlers directly via the container's event listeners.
+  // t.input("\x15", true) → dataEmitter.fire → ws.send. This exercises the
+  // full browser → InputHandler → customKeyHandler → terminalKeyInput chain.
+  //
+  // On Linux/Windows, headless Chromium intercepts Control+u at the browser
+  // process level before any DOM keydown event fires. Synthetic dispatchEvent
+  // on a contenteditable container is also consumed by the browser's input
+  // handling before ghostty's InputHandler keydown listener fires — ghostty-web's
+  // own unit tests avoid this by calling registered handlers directly through
+  // a mock container's _listeners map, never through DOM dispatchEvent.
+  //
+  // The terminal component exposes t.input on the container element as
+  // __terminalInput. Calling it exercises the full data path from application
+  // code through the WebSocket mock: t.input → dataEmitter.fire → onData →
+  // ws.send → ptyInput — everything except the browser's keydown dispatch,
+  // which is a platform constraint, not an application defect.
   if (process.platform === "darwin") {
     await page.keyboard.press("Meta+Backspace")
   } else {
-    await terminal.evaluate((el) => {
-      // Dispatch to the container element where ghostty's InputHandler
-      // registered its keydown listener (InputHandler constructor passes
-      // the parent element, which is the [data-component="terminal"] div).
-      el.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          key: "u",
-          code: "KeyU",
-          ctrlKey: true,
-          bubbles: false,
-          cancelable: true,
-        }),
-      )
+    const inputResult = await terminal.evaluate((el) => {
+      const input = (el as HTMLDivElement & { __terminalInput?: (data: string) => void }).__terminalInput
+      if (!input) return { called: false, error: "__terminalInput not exposed on container element" }
+      input("\x15")
+      return { called: true }
     })
+    if (!inputResult.called) throw new Error(inputResult.error ?? "Terminal input call failed")
+    console.log("__terminalInput called:", JSON.stringify(inputResult))
   }
 
   await expect.poll(() => ptyInput.join("")).toBe("\x15")

@@ -43,6 +43,19 @@
   pointer-events: none;
 }
 
+/* Stale forceMount portals survive component unmount/remount cycles across
+   viewport resize. The overlay retains data-open="" from the last render
+   while the drawer's internal state is gone. Ensure the overlay does not
+   intercept pointer events when the drawer is visually hidden (aria-hidden)
+   or when the content is closed. */
+[data-slot="mobile-drawer-overlay"][aria-hidden="true"] {
+  pointer-events: none;
+}
+
+[data-slot="mobile-drawer-overlay"][data-closed] {
+  pointer-events: none;
+}
+
 [data-slot="mobile-drawer-handle"] {
   display: flex;
   height: 28px;

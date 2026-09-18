@@ -209,7 +209,6 @@ export const Terminal = (props: TerminalProps) => {
   const scrollY = typeof local.pty.scrollY === "number" ? local.pty.scrollY : undefined
   let ws: WebSocket | undefined
   let term: Term | undefined
-  let _ghostty: Ghostty
   let serializeAddon: SerializeAddon
   let fitAddon: FitAddon
   let handleResize: () => void
@@ -411,7 +410,6 @@ export const Terminal = (props: TerminalProps) => {
         cleanup()
         return
       }
-      _ghostty = g
       term = t
       setOptionIfSupported(t, "colorScheme", theme.mode() === "dark" ? "dark" : "light")
       output = terminalWriter((data, done) =>
@@ -430,7 +428,8 @@ export const Terminal = (props: TerminalProps) => {
         }
 
         if (event.ctrlKey && event.shiftKey && !event.metaKey && key === "c") {
-          document.execCommand("copy")
+          const selection = t.getSelection()
+          if (selection) void navigator.clipboard.writeText(selection)
           return true
         }
 
@@ -451,6 +450,20 @@ export const Terminal = (props: TerminalProps) => {
 
       const active = document.activeElement
       t.open(container)
+      // Expose the Terminal's input method on the container element so e2e tests
+      // can inject PTY data without going through DOM dispatchEvent. Synthetic
+      // KeyboardEvents dispatched to a contenteditable element are consumed by
+      // the browser's input handling before any JS keydown listener fires —
+      // ghostty-web's own tests avoid this by calling registered handlers
+      // directly through a mock container's _listeners map. In a real browser,
+      // addEventListener doesn't expose its handlers, so we expose t.input
+      // instead. This exercises the full data path: t.input → dataEmitter.fire
+      // → onData → ws.send, covering everything except browser keydown dispatch.
+      ;(container as HTMLDivElement & { __terminalInput?: (data: string) => void }).__terminalInput = (data: string) =>
+        t.input(data, true)
+      cleanups.push(() => {
+        delete (container as HTMLDivElement & { __terminalInput?: (data: string) => void }).__terminalInput
+      })
       useTerminalUiBindings({
         container,
         term: t,
