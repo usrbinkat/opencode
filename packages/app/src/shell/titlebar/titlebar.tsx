@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createResource, Match, Show, Switch, untrack } from "solid-js"
+import { createEffect, createMemo, createResource, createSignal, Match, Show, Switch, untrack } from "solid-js"
 import { createStore, unwrap } from "solid-js/store"
 import { Dynamic, Portal } from "solid-js/web"
 import { useLocation, useNavigate } from "@solidjs/router"
@@ -414,6 +414,20 @@ export function Titlebar(props: {
             })
 
             const [mobileTabs, setMobileTabs] = createStore({ open: false, settings: false })
+            // Track corvu's content presence so MobileDrawerContent stays mounted
+            // until the drawer finishes its close lifecycle. Without this, the
+            // <Show when={mounted}> guard unmounts content in the same reactive batch
+            // as open going false, causing the drawer Root's afterPaint callback to
+            // read drawerStyles() on a null contentRef (TypeError).
+            //
+            // drawerShouldMount is true when: the drawer is open (mobileTabs.open &&
+            // mobile()), OR corvu's contentPresent is holding during the close
+            // animation. It is NOT true merely because mobile() is true — mounting
+            // the Portal when the drawer is closed causes corvu's createPresence to
+            // initialize with a null overlayRef, which can return present: true for
+            // one frame and render a stale overlay element in document.body.
+            const [drawerContentPresent, setDrawerContentPresent] = createSignal(false)
+            const drawerShouldMount = createMemo(() => (mobileTabs.open && mobile()) || drawerContentPresent())
             const currentProject = createMemo(() => {
               const tab = currentTab()
               const value = session()
@@ -456,18 +470,19 @@ export function Titlebar(props: {
                 </Show>
                 <Show when={!mobile() && !props.verticalTabs}>{homeButton()}</Show>
 
-                {/* MobileDrawer lives outside the <Show when={!mobile()}> branch so it
-                    is never unmounted by the media query. When the viewport exceeds the
-                    mobile breakpoint, open becomes false and corvu closes the drawer
-                    with its animation, cleaning up overlay and content elements through
-                    the normal presence lifecycle. Mounting the drawer conditionally via
-                    <Show> orphans forceMount portal elements in document.body when the
-                    branch unmounts while the drawer is open — corvu's reactive context
-                    dies and the overlay freezes with data-open="" and pointer-events: auto. */}
+                {/* MobileDrawer root lives outside <Show when={!mobile()}> so its reactive
+                    context survives viewport changes. MobileDrawerContent uses a mounted
+                    guard driven by drawerShouldMount — true while mobile() OR while
+                    corvu's contentPresent holds during the close animation. This lets
+                    corvu's afterPaint read drawerStyles() safely before content unmounts,
+                    then removes Portal/Overlay/Content from the DOM once the presence
+                    lifecycle completes. No orphaned overlays, no duplicate tab elements
+                    after the close animation finishes. */}
                 <MobileDrawer
                   open={mobileTabs.open && mobile()}
                   onOpenChange={(open) => setMobileTabs("open", open)}
                   onContentPresentChange={(present) => {
+                    setDrawerContentPresent(present)
                     if (present || !mobileTabs.settings) return
                     setMobileTabs("settings", false)
                     openSettings()
@@ -523,7 +538,7 @@ export function Titlebar(props: {
                       <span class="shrink-0 text-v2-text-text-muted">{tabsStore.length}</span>
                     </MobileDrawerTrigger>
                   </Show>
-                  <MobileDrawerContent>
+                  <MobileDrawerContent mounted={drawerShouldMount()}>
                     <MobileDrawerLabel class="sr-only">{language.t("titlebar.tabs")}</MobileDrawerLabel>
                     <div data-slot="mobile-tabs-drawer" data-corvu-no-drag>
                       <div data-slot="mobile-tabs-drawer-list">

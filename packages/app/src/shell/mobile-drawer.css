@@ -38,12 +38,6 @@
   transition-duration: 200ms;
 }
 
-[data-slot="mobile-drawer-content"][data-closed] {
-  visibility: hidden;
-  pointer-events: none;
-}
-
-
 [data-slot="mobile-drawer-handle"] {
   display: flex;
   height: 28px;

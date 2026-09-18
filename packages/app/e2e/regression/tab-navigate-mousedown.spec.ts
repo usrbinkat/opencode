@@ -148,11 +148,22 @@ test("mobile drawer exposes close controls and navigates between tabs", async ({
     await page.setViewportSize({ width: 450, height: 720 })
     await expect(tabA).toBeVisible()
     await page.setViewportSize({ width: 1280, height: 720 })
-    await expect(tabA.locator("[data-titlebar-tab]")).toHaveAttribute("data-title-overflow", "false")
+    // MobileDrawerContent stays mounted during the corvu close animation
+    // (~200ms) so afterPaint can read drawerStyles safely, then unmounts
+    // once contentPresent goes false. Wait for the overlay to be gone.
+    await expect(page.locator("[data-corvu-drawer-overlay]")).toHaveCount(0, { timeout: 5_000 })
+    await expect(page.locator("[data-corvu-drawer-content]")).toHaveCount(0, { timeout: 5_000 })
+    // Scope to the desktop tab strip to avoid matching any residual mobile elements.
+    const desktopTabA = page.locator('[data-slot="titlebar-tabs"] [data-titlebar-tab-slot]:has(a[href="' + hrefA + '"])')
+    await expect(desktopTabA.locator("[data-titlebar-tab]")).toHaveAttribute("data-title-overflow", "false")
     await page.setViewportSize({ width: 450, height: 720 })
 
-    // Instrument: capture drawer overlay state before click to diagnose
-    // corvu drawer overlay intercepting pointer events after viewport resize
+    // Wait for the mobile trigger to be visible before clicking — SolidJS
+    // reactive update for <Show when={mobile()}> must fire after resize.
+    await expect(page.getByRole("button", { name: "Tabs", exact: true })).toBeVisible()
+
+    // Instrument: capture drawer overlay state after viewport resize to verify
+    // the mounted guard + onContentPresentChange lifecycle eliminates orphaning.
     const overlayState = await page.evaluate(() => {
       const overlays = [...document.querySelectorAll("[data-corvu-drawer-overlay]")]
       const drawers = [...document.querySelectorAll("[data-corvu-drawer-content]")]

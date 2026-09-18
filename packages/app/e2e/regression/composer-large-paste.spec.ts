@@ -88,7 +88,16 @@ for (const lines of [6000, 25000]) {
 }
 
 async function expectCaretVisible(input: Locator) {
-  // Log diagnostic state before the poll so failures have visibility
+  // Wait for the compositor to paint the current scroll position before reading
+  // bounding rects. After ControlOrMeta+End in a tall contenteditable, the scroll
+  // position updates synchronously but getBoundingClientRect on the caret range
+  // can return stale coordinates from the pre-scroll layout until the next
+  // compositor frame.
+  await input.evaluate(
+    () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+  )
+
+  // Log diagnostic state after compositor settle so failures have visibility
   const diag = await input.evaluate((element) => {
     const selection = window.getSelection()
     const scrollable = element.closest("[data-scrollable]") ?? element

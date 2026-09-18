@@ -1,5 +1,5 @@
 import Drawer from "@corvu/drawer"
-import type { ParentProps } from "solid-js"
+import { Show, type ParentProps } from "solid-js"
 import { useLanguage } from "@/runtime/i18n/language"
 import "./mobile-drawer.css"
 
@@ -28,18 +28,30 @@ export function MobileDrawer(
 
 export const MobileDrawerTrigger = Drawer.Trigger
 
-export function MobileDrawerContent(props: ParentProps) {
+/**
+ * Portal/Overlay/Content children of the drawer. The `mounted` prop controls
+ * whether these elements exist in the DOM at all. When `mounted` is false the
+ * children are removed immediately — no corvu presence animation runs. This
+ * prevents orphaned overlay elements when the viewport crosses the mobile
+ * breakpoint: the close animation is wasted work the user never sees (the
+ * entire mobile layout is replaced by the desktop layout), and running it
+ * creates a window where both mobile and desktop tab strips coexist in the
+ * DOM. The Drawer root stays mounted so its reactive context survives.
+ */
+export function MobileDrawerContent(props: ParentProps<{ mounted?: boolean }>) {
   const language = useLanguage()
   return (
-    <Drawer.Portal>
-      <Drawer.Overlay data-slot="mobile-drawer-overlay" />
-      <Drawer.Content data-slot="mobile-drawer-content" dir={language.direction()}>
-        <div data-slot="mobile-drawer-handle" aria-hidden="true">
-          <span />
-        </div>
-        {props.children}
-      </Drawer.Content>
-    </Drawer.Portal>
+    <Show when={props.mounted !== false}>
+      <Drawer.Portal>
+        <Drawer.Overlay data-slot="mobile-drawer-overlay" />
+        <Drawer.Content data-slot="mobile-drawer-content" dir={language.direction()}>
+          <div data-slot="mobile-drawer-handle" aria-hidden="true">
+            <span />
+          </div>
+          {props.children}
+        </Drawer.Content>
+      </Drawer.Portal>
+    </Show>
   )
 }
 
