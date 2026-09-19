@@ -149,11 +149,21 @@
     # Cross-system outputs
     // {
       # Composable overlay for downstream consumers
+      # Self-contained: injects bun2nix from flake inputs so consumers
+      # do not need to apply the bun2nix overlay separately.
       # Usage: overlays = [ opencode.overlays.default ];
-      overlays.default = final: _prev: rec {
-        opencode = final.callPackage ./nix/opencode.nix { inherit rev; };
-        opencode-desktop = final.callPackage ./nix/desktop.nix { inherit opencode; };
-      };
+      overlays.default =
+        final: _prev:
+        let
+          b2n = bun2nix.packages.${final.stdenv.hostPlatform.system}.bun2nix;
+        in
+        rec {
+          opencode = final.callPackage ./nix/opencode.nix {
+            inherit rev;
+            bun2nix = b2n;
+          };
+          opencode-desktop = final.callPackage ./nix/desktop.nix { inherit opencode; };
+        };
 
       # Home Manager module — user-level opencode installation
       # Usage: imports = [ opencode.homeManagerModules.default ];
