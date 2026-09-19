@@ -4,6 +4,7 @@ import {
   partDelta,
   partUpdated,
   renderedPartID,
+  server as fixtureServer,
   session,
   sessionID,
   setupTimeline,
@@ -446,7 +447,7 @@ for (const device of ["Pixel 7", "iPhone 13"]) {
         test(`detached session gestures do not unpin the selected session (${width}px, ${release})`, async ({
           page,
         }, testInfo) => {
-          const server = testInfo.project.use.baseURL!
+          const server = fixtureServer
           const second = "ses_gesture_destination"
           await page.addInitScript(
             ({ server, first, second }) => {
@@ -490,6 +491,28 @@ for (const device of ["Pixel 7", "iPhone 13"]) {
           await expect
             .poll(() => tail.evaluate((element) => element.getBoundingClientRect().top))
             .toBeGreaterThan(before)
+          // Instrument: capture tab state and DOM before attempting session switch
+          const tabDiag = await page.evaluate((second) => {
+            const stored = JSON.parse(localStorage.getItem("opencode.window.browser.dat:tabs") ?? "[]")
+            const tabLinks = [...document.querySelectorAll("[data-titlebar-tab-link]")].map((el) => ({
+              href: el.getAttribute("href"),
+              slot: el.closest("[data-slot]")?.getAttribute("data-slot") ?? "none",
+              visible: el.getBoundingClientRect().height > 0,
+            }))
+            const drawerLinks = [...document.querySelectorAll('[data-slot="mobile-tabs-drawer"] [data-titlebar-tab-link]')].map((el) => el.getAttribute("href"))
+            const trigger = document.querySelector('[data-slot="mobile-tabs-trigger"]')
+            return {
+              storedTabs: stored,
+              tabLinksInDOM: tabLinks,
+              drawerLinksInDOM: drawerLinks,
+              triggerExists: !!trigger,
+              triggerVisible: trigger ? trigger.getBoundingClientRect().height > 0 : false,
+              secondSessionID: second,
+              url: location.href,
+            }
+          }, second)
+          console.log(`tab diagnostics (${width}px):`, JSON.stringify(tabDiag, null, 2))
+
           if (width < 768) {
             await page.locator('[data-slot="mobile-tabs-trigger"]').click()
             await page

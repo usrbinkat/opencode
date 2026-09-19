@@ -165,7 +165,55 @@ test("routes typing to the composer unless the open terminal is focused", async 
   await expect(composer).toHaveText("")
 
   await page.waitForTimeout(300)
-  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  // Instrument: capture what element is at (5,5) on the chat panel and
+  // whether it's focusable, before attempting to move focus away
+  const panelClickTarget = await page.evaluate(() => {
+    const panel = document.querySelector('[data-slot="session-chat-panel"]')
+    if (!panel) return { error: "panel not found" }
+    const rect = panel.getBoundingClientRect()
+    const target = document.elementFromPoint(rect.x + 5, rect.y + 5)
+    return {
+      panelTag: panel.tagName,
+      panelTabIndex: (panel as HTMLElement).tabIndex,
+      panelHasTabIndex: panel.hasAttribute("tabindex"),
+      panelContentEditable: panel.getAttribute("contenteditable"),
+      targetTag: target?.tagName ?? "null",
+      targetTabIndex: target instanceof HTMLElement ? target.tabIndex : -1,
+      targetDataSlot: target?.getAttribute("data-slot") ?? "null",
+      targetDataComponent: target?.getAttribute("data-component") ?? "null",
+      targetIsSameAsPanel: target === panel,
+    }
+  })
+  console.log("panel click target at (5,5):", JSON.stringify(panelClickTarget))
+
+  // Move focus to document.body. Clicking the chat panel focuses the
+  // panel div itself (it's focusable). Direct blur() on the terminal
+  // textarea is undone by ghostty's deferred focus() call. Focusing
+  // document.body directly avoids both problems.
+  await page.evaluate(() => {
+    ;(document.activeElement as HTMLElement | null)?.blur()
+    document.body.focus()
+  })
+
+  // Instrument: sample activeElement at 0, 50, 100, 200ms after body.focus()
+  // to detect ghostty's deferred setTimeout(focus, 0) stealing focus back
+  const focusStealTrace = await page.evaluate(() =>
+    new Promise<Array<{ ms: number; tag: string; id: string }>>((resolve) => {
+      const log: Array<{ ms: number; tag: string; id: string }> = []
+      const start = performance.now()
+      const sample = () => log.push({
+        ms: Math.round(performance.now() - start),
+        tag: document.activeElement?.tagName ?? "null",
+        id: document.activeElement?.id ?? "",
+      })
+      sample()
+      ;[50, 100, 200].forEach((delay) => setTimeout(sample, delay))
+      setTimeout(() => { sample(); resolve(log) }, 300)
+    }),
+  )
+  console.log("focus steal trace after body.focus():", JSON.stringify(focusStealTrace))
+
+  await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).toBe("BODY")
 
   // Instrument: track every focusin event between blur and type to catch what claims focus
   await page.evaluate(() => {

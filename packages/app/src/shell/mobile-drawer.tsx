@@ -1,5 +1,5 @@
 import Drawer from "@corvu/drawer"
-import { createEffect, on, type ParentProps } from "solid-js"
+import { createEffect, on, untrack, type ParentProps } from "solid-js"
 import { useLanguage } from "@/runtime/i18n/language"
 import "./mobile-drawer.css"
 
@@ -35,7 +35,22 @@ export function MobileDrawer(
       finalFocusEl={props.returnFocus?.()}
       closeOnOutsideFocus={props.closeOnOutsideFocus}
     >
-      {props.children}
+      {(drawerState: any) => {
+        createEffect(() => {
+          const state = {
+            open: drawerState.open,
+            transitionState: drawerState.transitionState,
+            isTransitioning: drawerState.isTransitioning,
+            isDragging: drawerState.isDragging,
+            openPercentage: drawerState.openPercentage,
+            translate: drawerState.translate,
+            contentPresent: drawerState.contentPresent,
+            overlayPresent: drawerState.overlayPresent,
+          }
+          console.log("[MobileDrawer] corvu state:", JSON.stringify(state))
+        })
+        return untrack(() => props.children)
+      }}
     </Drawer>
   )
 }

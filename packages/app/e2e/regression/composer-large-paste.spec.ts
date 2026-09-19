@@ -141,10 +141,57 @@ for (const width of [390, 1280]) {
       const suffix = "\nExisting trailing content".repeat(100)
       await input.fill("Before " + suffix)
       await input.press("ControlOrMeta+Home")
+
+      // Instrument: capture caret position and dir resolution before and after arrow
+      const beforeArrow = await input.evaluate((el) => {
+        const sel = window.getSelection()
+        const computed = getComputedStyle(el)
+        return {
+          dir: el.getAttribute("dir"),
+          computedDirection: computed.direction,
+          docDir: document.documentElement.dir,
+          anchorOffset: sel?.anchorOffset ?? -1,
+          focusOffset: sel?.focusOffset ?? -1,
+          anchorNodeText: sel?.anchorNode?.textContent?.slice(0, 20) ?? "null",
+          isCollapsed: sel?.isCollapsed ?? false,
+        }
+      })
+      console.log(`[${direction}] before arrow:`, JSON.stringify(beforeArrow))
+
+      // The editor uses dir="auto" which resolves to LTR for Latin text
+      // ("Before "). ArrowRight moves forward in LTR content regardless
+      // of the document's direction attribute.
       await input.press("ArrowRight")
+
+      const afterArrow = await input.evaluate(() => {
+        const sel = window.getSelection()
+        return {
+          anchorOffset: sel?.anchorOffset ?? -1,
+          focusOffset: sel?.focusOffset ?? -1,
+          anchorNodeText: sel?.anchorNode?.textContent?.slice(0, 20) ?? "null",
+          isCollapsed: sel?.isCollapsed ?? false,
+        }
+      })
+      console.log(`[${direction}] after arrow:`, JSON.stringify(afterArrow))
       const text = "Pasted line /tmp/example.ts 123 \u0645\u0631\u062d\u0628\u0627\n".repeat(100) + "End of paste"
       await page.evaluate((text) => navigator.clipboard.writeText(text), text)
       await page.keyboard.press("ControlOrMeta+V")
+
+      // Instrument: capture selection state and content immediately after paste
+      const afterPaste = await input.evaluate((el) => {
+        const sel = window.getSelection()
+        const content = (el as HTMLElement).innerText
+        return {
+          anchorOffset: sel?.anchorOffset ?? -1,
+          focusOffset: sel?.focusOffset ?? -1,
+          isCollapsed: sel?.isCollapsed ?? false,
+          contentFirst20: content.slice(0, 20),
+          contentLast20: content.slice(-20),
+          contentLength: content.length,
+        }
+      })
+      console.log(`[${direction}] after paste:`, JSON.stringify(afterPaste))
+
       await expect.poll(() => input.innerText()).toBe("B" + text + "efore " + suffix)
       await expectCaretVisible(input)
       await page.keyboard.type("!")

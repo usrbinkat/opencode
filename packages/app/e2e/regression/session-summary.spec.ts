@@ -43,20 +43,51 @@ for (const custom of [false, true]) {
           btn.addEventListener(type, () => record(type, "trigger"))
         }
       }
-      new MutationObserver(() => {
+      const observer = new MutationObserver(() => {
         const tooltip = document.querySelector('[role="tooltip"]')
-        if (tooltip) record("tooltip-mounted", tooltip.textContent?.slice(0, 40) ?? "")
-      }).observe(document.body, { childList: true, subtree: true })
+        if (tooltip) {
+          record("tooltip-mounted", tooltip.textContent?.slice(0, 40) ?? "")
+          observer.disconnect()
+        }
+      })
+      observer.observe(document.body, { childList: true, subtree: true })
       ;(window as any).__tooltipLog = log
     })
 
-    await trigger.hover()
-    const tooltip = page.getByRole("tooltip")
-    await expect(tooltip).toBeVisible()
+    // Instrument: log trigger bounding rect and capture pointer position
+    // during the hover by registering the listener BEFORE the hover action
+    const triggerRect = await trigger.boundingBox()
+    console.log("trigger bounding box before hover:", JSON.stringify(triggerRect))
 
+    await page.evaluate(() => {
+      const positions: Array<{ x: number; y: number; ms: number }> = []
+      const start = performance.now()
+      const handler = (e: PointerEvent) => {
+        positions.push({ x: e.clientX, y: e.clientY, ms: Math.round(performance.now() - start) })
+      }
+      document.addEventListener("pointermove", handler)
+      ;(window as any).__pointerPositions = positions
+      ;(window as any).__pointerCleanup = () => document.removeEventListener("pointermove", handler)
+    })
+
+    await trigger.hover()
+
+    const pointerPositions = await page.evaluate(() => {
+      ;(window as any).__pointerCleanup?.()
+      return (window as any).__pointerPositions ?? []
+    })
+    console.log("pointer positions during hover:", JSON.stringify(pointerPositions))
+
+    const tooltip = page.getByRole("tooltip")
+
+    // Read instrumentation before the visibility assertion so we get
+    // diagnostic output even when the tooltip never mounts (flake).
+    // Wait 1.5s for the tooltip's open delay (~800ms + render) before reading.
+    await page.waitForTimeout(1500)
     const tooltipLog = await page.evaluate(() => (window as any).__tooltipLog ?? [])
     console.log("tooltip instrumentation:", JSON.stringify(tooltipLog, null, 2))
 
+    await expect(tooltip).toBeVisible()
     await expect(tooltip).toContainText("Summary")
     const mac = await page.evaluate(() => /(Mac|iPod|iPhone|iPad)/.test(navigator.platform))
     const shortcut = custom ? "F8" : mac ? "Meta+Shift+Y" : "Control+Shift+Y"
