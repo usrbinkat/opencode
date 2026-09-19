@@ -167,25 +167,58 @@ test("routes typing to the composer unless the open terminal is focused", async 
   await page.waitForTimeout(300)
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
 
-  // Instrument: capture activeElement before and after typing to diagnose focus routing
+  // Instrument: track every focusin event between blur and type to catch what claims focus
+  await page.evaluate(() => {
+    const log: Array<{ ms: number; type: string; target: string; related: string; active: string }> = []
+    const start = performance.now()
+    const record = (event: FocusEvent) => {
+      const t = event.target instanceof HTMLElement ? event.target : null
+      const r = event.relatedTarget instanceof HTMLElement ? event.relatedTarget : null
+      log.push({
+        ms: Math.round(performance.now() - start),
+        type: event.type,
+        target: t ? `${t.tagName}${t.getAttribute("role") ? `[role=${t.getAttribute("role")}]` : ""}${t.getAttribute("data-component") ? `[data-component=${t.getAttribute("data-component")}]` : ""}` : "null",
+        related: r ? `${r.tagName}${r.getAttribute("role") ? `[role=${r.getAttribute("role")}]` : ""}` : "null",
+        active: `${document.activeElement?.tagName ?? "null"}${document.activeElement?.getAttribute("role") ? `[role=${document.activeElement.getAttribute("role")}]` : ""}`,
+      })
+    }
+    document.addEventListener("focusin", record, true)
+    document.addEventListener("focusout", record, true)
+    ;(window as any).__focusLog = log
+    ;(window as any).__cleanupFocusLog = () => {
+      document.removeEventListener("focusin", record, true)
+      document.removeEventListener("focusout", record, true)
+    }
+  })
+
   const beforeType = await page.evaluate(() => ({
     tag: document.activeElement?.tagName ?? "null",
     role: document.activeElement?.getAttribute("role") ?? "",
     id: document.activeElement?.id ?? "",
     className: document.activeElement?.className?.slice(0, 60) ?? "",
+    preventAutofocus: document.activeElement?.closest("[data-prevent-autofocus]") ? true : false,
+    contentEditable: document.activeElement?.getAttribute("contenteditable") ?? "null",
   }))
   console.log("activeElement before type:", JSON.stringify(beforeType))
 
   await page.keyboard.type("a")
 
-  const afterType = await page.evaluate(() => ({
-    tag: document.activeElement?.tagName ?? "null",
-    role: document.activeElement?.getAttribute("role") ?? "",
-    id: document.activeElement?.id ?? "",
-    className: document.activeElement?.className?.slice(0, 60) ?? "",
-    composerText: document.querySelector('[data-component="composer-editor"]')?.textContent ?? "",
-  }))
+  const afterType = await page.evaluate(() => {
+    ;(window as any).__cleanupFocusLog?.()
+    return {
+      tag: document.activeElement?.tagName ?? "null",
+      role: document.activeElement?.getAttribute("role") ?? "",
+      id: document.activeElement?.id ?? "",
+      className: document.activeElement?.className?.slice(0, 60) ?? "",
+      composerText: document.querySelector('[data-component="composer-editor"]')?.textContent ?? "",
+      preventAutofocus: document.activeElement?.closest("[data-prevent-autofocus]") ? true : false,
+      contentEditable: document.activeElement?.getAttribute("contenteditable") ?? "null",
+    }
+  })
   console.log("activeElement after type:", JSON.stringify(afterType))
+
+  const focusLog = await page.evaluate(() => (window as any).__focusLog ?? [])
+  console.log("focus events between blur and type:", JSON.stringify(focusLog, null, 2))
 
   await expect.poll(() => composer.evaluate((el) => document.activeElement === el), { timeout: 10_000 }).toBe(true)
   await expect(composer).toHaveText("a")

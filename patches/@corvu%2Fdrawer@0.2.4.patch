@@ -1,0 +1,62 @@
+--- a/dist/index.js	2026-09-18 20:45:46.623459710 -0700
++++ b/dist/index.js	2026-09-18 21:06:15.003499812 -0700
+@@ -332,12 +332,14 @@
+       dragStartPos = null;
+     },
+     onTransitionEnd: (e) => {
++      console.log("[corvu-drawer] onTransitionEnd", { property: e.propertyName, targetMatch: e.target === dialogContext().contentRef(), transitionState: drawerContext().transitionState() });
+       if (e.target !== dialogContext().contentRef()) return;
+       batch(() => {
+         if (drawerContext().transitionState() === "closing") {
+           drawerContext().closeDrawer();
+         }
+         if (drawerContext().transitionState() !== "resizing") {
++          console.log("[corvu-drawer] onTransitionEnd: clearing transitionState");
+           drawerContext().setTransitionState(null);
+         }
+       });
+@@ -470,21 +472,30 @@
+   const [transitionAwareOpen, setTransitionAwareOpen] = createSignal(false);
+   createEffect(() => {
+     const _open = open();
++    console.log("[corvu-drawer] createEffect fired", { _open, transitionAwareOpen: transitionAwareOpen(), transitionState: transitionState(), translate: translate(), drawerSize: drawerSize(), activeSnapPoint: activeSnapPoint() });
+     untrack(() => {
+       if (transitionAwareOpen() === _open) {
++        console.log("[corvu-drawer] early return: transitionAwareOpen === _open", { value: _open });
+         return;
+       }
+       if (_open) {
++        console.log("[corvu-drawer] open=true, setTransitionAwareOpen(true)", { drawerSize: drawerSize(), translate: translate(), activeSnapPoint: activeSnapPoint() });
+         setTransitionAwareOpen(true);
+         afterPaint(() => {
+-          batch(() => {
+-            setTransitionState("opening");
++          if (!open()) { console.log("[corvu-drawer] afterPaint1: open went false, skip"); return; }
++          console.log("[corvu-drawer] afterPaint1: setTransitionState('opening')", { drawerSize: drawerSize(), translate: translate(), activeSnapPoint: activeSnapPoint(), contentRef: !!dialogContext()?.contentRef() });
++          setTransitionState("opening");
++          afterPaint(() => {
++            if (!open()) { console.log("[corvu-drawer] afterPaint2: open went false, skip"); return; }
++            console.log("[corvu-drawer] afterPaint2: setActiveSnapPoint", { defaultSnapPoint: localProps.defaultSnapPoint, drawerSize: drawerSize(), translateBefore: translate() });
+             setActiveSnapPoint(localProps.defaultSnapPoint);
++            console.log("[corvu-drawer] afterPaint2: after setActiveSnapPoint", { translate: translate(), resolvedOffset: resolvedActiveSnapPoint().offset });
++            const transitionDuration = parseFloat(drawerStyles().transitionDuration);
++            console.log("[corvu-drawer] afterPaint2: transitionDuration", transitionDuration);
++            if (transitionDuration === 0) {
++              setTransitionState(null);
++            }
+           });
+-          const transitionDuration = parseFloat(drawerStyles().transitionDuration);
+-          if (transitionDuration === 0) {
+-            setTransitionState(null);
+-          }
+         });
+       } else {
+         batch(() => {
+@@ -492,6 +503,7 @@
+           setActiveSnapPoint(0);
+         });
+         afterPaint(() => {
++          if (open()) return;
+           const transitionDuration = parseFloat(drawerStyles().transitionDuration);
+           if (transitionDuration === 0) {
+             closeDrawer();

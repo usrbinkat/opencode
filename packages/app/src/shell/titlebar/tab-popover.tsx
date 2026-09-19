@@ -1,5 +1,5 @@
 import { HoverCard } from "@kobalte/core/hover-card"
-import { createSignal, Show, type JSXElement } from "solid-js"
+import { createMemo, createSignal, Show, type JSXElement } from "solid-js"
 import { useLanguage } from "@/runtime/i18n/language"
 import { createMediaQuery } from "@solid-primitives/media"
 import "./tab-popover.css"
@@ -35,6 +35,18 @@ export function TabPreviewPopover(props: {
   // disappears instantly (no repeated enter/exit animation) — only the first,
   // "cold" preview animates. Mirrors how browsers reuse one tab tooltip.
   const [instant, setInstant] = createSignal(false)
+  // Eagerly resolve placement inside the component root so the createMemo
+  // is owned by a tracked scope. SolidJS defers memo creation for inline
+  // JSX prop expressions to first access; if that first access happens
+  // inside a ResizeObserver callback (from @floating-ui/dom via @kobalte),
+  // the memo is created outside a root and never disposed.
+  const placement = createMemo(() =>
+    props.orientation === "vertical"
+      ? language.direction() === "rtl"
+        ? "left-start"
+        : "right-start"
+      : ("bottom-start" as const),
+  )
 
   const warm = () => Date.now() - lastClosedAt < SKIP_WINDOW
   // Kobalte reads openDelay lazily when the pointer enters the trigger, so this
@@ -55,13 +67,7 @@ export function TabPreviewPopover(props: {
       // The preview is non-interactive (pointer-events: none), so there is no
       // safe area to traverse — leaving the tab hides it immediately.
       ignoreSafeArea
-      placement={
-        props.orientation === "vertical"
-          ? language.direction() === "rtl"
-            ? "left-start"
-            : "right-start"
-          : "bottom-start"
-      }
+      placement={placement()}
       gutter={6}
     >
       <HoverCard.Trigger ref={triggerEl} as="div" data-component="session-tab-popover-trigger" tabIndex={-1}>
