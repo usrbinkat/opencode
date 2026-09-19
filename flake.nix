@@ -13,14 +13,8 @@
   };
 
   inputs = {
-    # nixpkgs: usrbinkat fork with bun 1.4.2 (matches packageManager field)
-    # Switch to NixOS/nixpkgs/nixpkgs-unstable once bun >= 1.4.2 lands upstream
+    # usrbinkat fork: gssproxy, freeipa, lesscpy, llvm patches ahead of upstream
     nixpkgs.url = "github:usrbinkat/nixpkgs/gssproxy-package-and-module";
-
-    bun = {
-      url = "github:usrbinkat/bun/03018e23a347abd3ae15fb799f3f64fed8dc1fb3";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
 
     bun2nix = {
       url = "github:usrbinkat/bun2nix";
@@ -33,7 +27,6 @@
       self,
       nixpkgs,
       bun2nix,
-      bun,
       ...
     }:
     let
@@ -60,7 +53,6 @@
               inherit system;
               overlays = [
                 bun2nix.overlays.default
-                bun.overlays.default
               ];
             }
           )
