@@ -268,8 +268,27 @@ test("routes typing to the composer unless the open terminal is focused", async 
   const focusLog = await page.evaluate(() => (window as any).__focusLog ?? [])
   console.log("focus events between blur and type:", JSON.stringify(focusLog, null, 2))
 
-  await expect.poll(() => composer.evaluate((el) => document.activeElement === el), { timeout: 10_000 }).toBe(true)
+  // Instrument: capture all focus assertion methods to find which work
+  const focusCheck = await page.evaluate(() => {
+    const active = document.activeElement
+    const composer = document.querySelector('[data-component="composer-editor"]')
+    return {
+      activeTag: active?.tagName ?? "null",
+      activeRole: active?.getAttribute("role") ?? "null",
+      activeDataComponent: active?.getAttribute("data-component") ?? "null",
+      activeContentEditable: active?.getAttribute("contenteditable") ?? "null",
+      composerExists: !!composer,
+      identityMatch: active === composer,
+      containsMatch: composer?.contains(active) ?? false,
+      dataComponentMatch: active?.getAttribute("data-component") === "composer-editor",
+      composerText: composer?.textContent ?? "",
+      composerCount: document.querySelectorAll('[data-component="composer-editor"]').length,
+    }
+  })
+  console.log("focus assertion methods:", JSON.stringify(focusCheck))
+
   await expect(composer).toHaveText("a")
+  await expect(composer).toBeFocused()
 })
 
 test("keeps composer focus when a cached terminal finishes mounting", async ({ page }) => {

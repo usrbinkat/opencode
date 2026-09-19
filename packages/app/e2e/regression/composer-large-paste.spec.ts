@@ -88,48 +88,83 @@ for (const lines of [6000, 25000]) {
 }
 
 async function expectCaretVisible(input: Locator) {
-  // Wait for the compositor to paint the current scroll position before reading
-  // bounding rects. After ControlOrMeta+End in a tall contenteditable, the scroll
-  // position updates synchronously but getBoundingClientRect on the caret range
-  // can return stale coordinates from the pre-scroll layout until the next
-  // compositor frame.
-  await input.evaluate(
-    () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
-  )
+  // Instrument: set up a continuous sampler inside the page that logs every
+  // poll iteration's state so we can diagnose which condition fails over time
+  await input.evaluate((element) => {
+    const log: Array<{
+      ms: number
+      isCollapsed: boolean
+      rangeCount: number
+      containsAnchor: boolean
+      caretHeight: number
+      caretTop: number
+      caretBottom: number
+      viewportTop: number
+      viewportBottom: number
+      scrollTop: number
+      scrollHeight: number
+      result: boolean
+      failReason: string
+    }> = []
+    const start = performance.now()
+    ;(window as any).__caretVisLog = log
+    ;(window as any).__caretVisSample = () => {
+      const selection = window.getSelection()
+      const scrollable = element.closest("[data-scrollable]") ?? element
+      const viewport = scrollable.getBoundingClientRect()
+      const isCollapsed = selection?.isCollapsed ?? false
+      const rangeCount = selection?.rangeCount ?? 0
+      const containsAnchor = selection?.anchorNode ? element.contains(selection.anchorNode) : false
+      const caret = rangeCount ? selection!.getRangeAt(0).getBoundingClientRect() : null
+      const caretHeight = caret?.height ?? 0
+      const caretTop = caret?.top ?? 0
+      const caretBottom = caret?.bottom ?? 0
+      const viewportTop = viewport.top
+      const viewportBottom = viewport.bottom
+      const scrollTop = scrollable instanceof HTMLElement ? scrollable.scrollTop : 0
+      const scrollHeight = scrollable instanceof HTMLElement ? scrollable.scrollHeight : 0
 
-  // Log diagnostic state after compositor settle so failures have visibility
-  const diag = await input.evaluate((element) => {
-    const selection = window.getSelection()
-    const scrollable = element.closest("[data-scrollable]") ?? element
-    const caret = selection?.rangeCount ? selection.getRangeAt(0).getBoundingClientRect() : null
-    const viewport = scrollable.getBoundingClientRect()
-    return {
-      hasSelection: !!selection,
-      isCollapsed: selection?.isCollapsed ?? null,
-      rangeCount: selection?.rangeCount ?? 0,
-      containsAnchor: selection?.anchorNode ? element.contains(selection.anchorNode) : null,
-      caretHeight: caret?.height ?? null,
-      caretTop: caret?.top ?? null,
-      caretBottom: caret?.bottom ?? null,
-      viewportTop: viewport.top,
-      viewportBottom: viewport.bottom,
-      scrollTop: scrollable instanceof HTMLElement ? scrollable.scrollTop : null,
-      scrollHeight: scrollable instanceof HTMLElement ? scrollable.scrollHeight : null,
+      let failReason = "pass"
+      if (!isCollapsed) failReason = "not-collapsed"
+      else if (!rangeCount) failReason = "no-range"
+      else if (!containsAnchor) failReason = "anchor-outside"
+      else if (caretHeight <= 0) failReason = "zero-height"
+      else if (caretTop < viewportTop - 1) failReason = "above-viewport"
+      else if (caretBottom > viewportBottom + 1) failReason = "below-viewport"
+
+      const result = failReason === "pass"
+      log.push({
+        ms: Math.round(performance.now() - start),
+        isCollapsed, rangeCount, containsAnchor,
+        caretHeight, caretTop, caretBottom,
+        viewportTop, viewportBottom,
+        scrollTop, scrollHeight,
+        result, failReason,
+      })
+      return result
     }
   })
-  console.log("expectCaretVisible state:", JSON.stringify(diag))
 
   await expect
     .poll(() =>
-      input.evaluate((element) => {
-        const selection = window.getSelection()
-        if (!selection?.isCollapsed || !selection.rangeCount || !element.contains(selection.anchorNode)) return false
-        const caret = selection.getRangeAt(0).getBoundingClientRect()
-        const viewport = (element.closest("[data-scrollable]") ?? element).getBoundingClientRect()
-        return caret.height > 0 && caret.top >= viewport.top - 1 && caret.bottom <= viewport.bottom + 1
-      }),
+      input.evaluate(() => (window as any).__caretVisSample?.() ?? false),
     )
     .toBe(true)
+
+  // Read and log the full sample history on both pass and fail
+  const caretLog = await input.evaluate(() => {
+    const log = (window as any).__caretVisLog ?? []
+    delete (window as any).__caretVisLog
+    delete (window as any).__caretVisSample
+    return log
+  })
+  // Log first 5, last 5, and any transitions between pass/fail
+  const summary = [
+    ...caretLog.slice(0, 5),
+    ...(caretLog.length > 10 ? [{ _gap: caretLog.length - 10 }] : []),
+    ...caretLog.slice(-5),
+  ]
+  console.log("expectCaretVisible samples:", JSON.stringify(summary, null, 2))
 }
 
 for (const width of [390, 1280]) {

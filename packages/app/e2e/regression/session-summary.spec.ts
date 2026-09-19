@@ -54,6 +54,12 @@ for (const custom of [false, true]) {
       ;(window as any).__tooltipLog = log
     })
 
+    // Enable Tooltip component debug logging and capture output
+    await page.evaluate(() => { (window as any).__tooltipDebug = true })
+    page.on("console", (msg) => {
+      if (msg.text().includes("[Tooltip]")) console.log("[page]", msg.text().slice(0, 300))
+    })
+
     // Instrument: log trigger bounding rect and capture pointer position
     // during the hover by registering the listener BEFORE the hover action
     const triggerRect = await trigger.boundingBox()
