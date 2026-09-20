@@ -66,9 +66,14 @@ export function Tooltip(props: TooltipProps) {
   const sync = () => {
     const expand = !!ref?.querySelector('[aria-expanded="true"], [data-expanded]')
     log("sync", { expand, prevExpand: state.expand })
+    const wasExpand = state.expand
     setState("expand", expand)
     if (expand) {
-      setState("block", true)
+      // Only arm block on the rising edge (false → true).
+      // Re-firing sync while already expanded must not re-arm block
+      // after drop() has cleared it — that creates an arm/clear cycle
+      // that leaves the tooltip permanently blocked.
+      if (!wasExpand) setState("block", true)
       close()
       return
     }
