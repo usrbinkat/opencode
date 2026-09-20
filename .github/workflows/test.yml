@@ -189,9 +189,8 @@ jobs:
     runs-on: ${{ matrix.settings.host }}
     timeout-minutes: 45
     env:
-      # TODO: restore v2 branch gate after CI validation:
-      # E2E_ENABLED: ${{ needs.affected.outputs.app == 'true' && github.ref_name != 'v2' && github.head_ref != 'v2' }}
-      E2E_ENABLED: ${{ needs.affected.outputs.app == 'true' }}
+      # Always run e2e on the v2 branch, gate on affected detection elsewhere.
+      E2E_ENABLED: ${{ github.ref_name == 'v2' || needs.affected.outputs.app == 'true' }}
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright-browsers
     defaults:
       run:
