@@ -32,6 +32,7 @@ const fetch = async (input: string | URL, init: Init = {}) => {
       entries: () => Object.entries(headers),
     },
     text: async () => text(),
+    // ast-grep-ignore: no-json-parse-cast
     json: async () => JSON.parse(text()) as unknown,
     bytes: async () => bytes,
   }
