@@ -1,14 +1,17 @@
-diff --git a/node_modules/.bun/@corvu+drawer@0.2.4+da52f1d607d95169/node_modules/@corvu/drawer/.bun-tag-d941b3d2d689a762 b/.bun-tag-d941b3d2d689a762
+diff --git a/workspace/usrbinkat/github.com/anomalyco/opencode/node_modules/.bun/@corvu+drawer@0.2.4+da52f1d607d95169/node_modules/@corvu/drawer/.bun-tag-b41eb2151a952992 b/.bun-tag-b41eb2151a952992
 new file mode 100644
 index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/.bun/@corvu+drawer@0.2.4+da52f1d607d95169/node_modules/@corvu/drawer/.bun-tag-f3cf618a394ab53a b/.bun-tag-f3cf618a394ab53a
+diff --git a/workspace/usrbinkat/github.com/anomalyco/opencode/node_modules/.bun/@corvu+drawer@0.2.4+da52f1d607d95169/node_modules/@corvu/drawer/.bun-tag-d941b3d2d689a762 b/.bun-tag-d941b3d2d689a762
 new file mode 100644
 index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
-diff --git a/node_modules/.bun/@corvu+drawer@0.2.4+da52f1d607d95169/node_modules/@corvu/drawer/.bun-tag-fed354228810582f b/.bun-tag-fed354228810582f
+diff --git a/workspace/usrbinkat/github.com/anomalyco/opencode/node_modules/.bun/@corvu+drawer@0.2.4+da52f1d607d95169/node_modules/@corvu/drawer/.bun-tag-f3cf618a394ab53a b/.bun-tag-f3cf618a394ab53a
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/workspace/usrbinkat/github.com/anomalyco/opencode/node_modules/.bun/@corvu+drawer@0.2.4+da52f1d607d95169/node_modules/@corvu/drawer/.bun-tag-fed354228810582f b/.bun-tag-fed354228810582f
 new file mode 100644
 index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 diff --git a/dist/index.js b/dist/index.js
-index c5248382bac4a58b510b48e023e27d14b89c390c..02826965bacb5cd74971c2536386d7ad07e532ca 100644
+index c5248382bac4a58b510b48e023e27d14b89c390c..bb9ed2c5fc8336f701ed9ec5dc17eedba12108b4 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -476,7 +476,12 @@ var DrawerRoot = (props) => {
@@ -25,7 +28,7 @@ index c5248382bac4a58b510b48e023e27d14b89c390c..02826965bacb5cd74971c2536386d7ad
            batch(() => {
              setTransitionState("opening");
              setActiveSnapPoint(localProps.defaultSnapPoint);
-@@ -487,11 +492,14 @@ var DrawerRoot = (props) => {
+@@ -487,14 +492,25 @@ var DrawerRoot = (props) => {
            }
          });
        } else {
@@ -40,8 +43,19 @@ index c5248382bac4a58b510b48e023e27d14b89c390c..02826965bacb5cd74971c2536386d7ad
            const transitionDuration = parseFloat(drawerStyles().transitionDuration);
            if (transitionDuration === 0) {
              closeDrawer();
++          } else {
++            var fallbackMs = transitionDuration * 1000 + 100;
++            setTimeout(function() {
++              if (!open() && transitionState() === "closing") {
++                console.log("[drawer-patch] closing fallback timer fired after " + fallbackMs + "ms");
++                closeDrawer();
++              }
++            }, fallbackMs);
+           }
+         });
+       }
 diff --git a/dist/index.jsx b/dist/index.jsx
-index fa3ca91ca526e9c11a10819a8bda27dcbb884af7..3be9f378a78c978bc76483fb5689b4494f4a6a6b 100644
+index fa3ca91ca526e9c11a10819a8bda27dcbb884af7..99e65aca09a21b38de6ebdac9b9f7c9099256853 100644
 --- a/dist/index.jsx
 +++ b/dist/index.jsx
 @@ -566,7 +566,9 @@ var DrawerRoot = (props) => {
@@ -55,7 +69,7 @@ index fa3ca91ca526e9c11a10819a8bda27dcbb884af7..3be9f378a78c978bc76483fb5689b449
            batch2(() => {
              setTransitionState("opening");
              setActiveSnapPoint(localProps.defaultSnapPoint);
-@@ -584,6 +586,7 @@ var DrawerRoot = (props) => {
+@@ -584,11 +586,19 @@ var DrawerRoot = (props) => {
            setActiveSnapPoint(0);
          });
          afterPaint(() => {
@@ -63,3 +77,15 @@ index fa3ca91ca526e9c11a10819a8bda27dcbb884af7..3be9f378a78c978bc76483fb5689b449
            const transitionDuration = parseFloat(
              drawerStyles().transitionDuration
            );
+           if (transitionDuration === 0) {
+             closeDrawer();
++          } else {
++            const fallbackMs = transitionDuration * 1000 + 100;
++            setTimeout(() => {
++              if (!open() && transitionState() === "closing") {
++                closeDrawer();
++              }
++            }, fallbackMs);
+           }
+         });
+       }
