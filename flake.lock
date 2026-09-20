@@ -10,11 +10,11 @@
         "treefmt-nix": "treefmt-nix"
       },
       "locked": {
-        "lastModified": 1789842566,
-        "narHash": "sha256-lcVB4HIKictIMvsXB+NqsxUGb96GeVJePeR3LzkDpsE=",
+        "lastModified": 1789869368,
+        "narHash": "sha256-hwPg7CmqVHWnNeWows2wodbvdR91MWol0sQ6rzIFpyU=",
         "owner": "usrbinkat",
         "repo": "bun2nix",
-        "rev": "a4bedb247cabd86e2ed760d17d6b1dfb650e4316",
+        "rev": "32fc1ab777c8110586e59cfea2bc31a6862ed313",
         "type": "github"
       },
       "original": {
