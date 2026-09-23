@@ -88,25 +88,60 @@ for (const lines of [6000, 25000]) {
 }
 
 async function expectCaretVisible(input: Locator) {
-  // The poll returns the first failing condition, so a failure names why the caret is not visible.
+  // Every poll iteration is sampled; a failure reports the first and last samples, showing which condition failed
+  // and whether the caret was converging.
+  const samples: Array<Record<string, unknown>> = []
+  const start = Date.now()
   await expect
-    .poll(() =>
-      input.evaluate((element) => {
+    .poll(async () => {
+      const sample = await input.evaluate((element) => {
         const selection = window.getSelection()
-        if (!selection) return "no-selection"
-        if (!selection.isCollapsed) return "not-collapsed"
-        if (!selection.rangeCount) return "no-range"
-        if (!element.contains(selection.anchorNode)) return "anchor-outside"
-        const caret = selection.getRangeAt(0).getBoundingClientRect()
-        const viewport = (element.closest("[data-scrollable]") ?? element).getBoundingClientRect()
-        if (caret.height <= 0) return "zero-height"
-        if (caret.top < viewport.top - 1) return `above-viewport caret=${caret.top} viewport=${viewport.top}`
-        if (caret.bottom > viewport.bottom + 1)
-          return `below-viewport caret=${caret.bottom} viewport=${viewport.bottom}`
-        return "pass"
-      }),
-    )
+        const scrollable = element.closest("[data-scrollable]") ?? element
+        const viewport = scrollable.getBoundingClientRect()
+        const isCollapsed = selection?.isCollapsed ?? false
+        const rangeCount = selection?.rangeCount ?? 0
+        const containsAnchor = selection?.anchorNode ? element.contains(selection.anchorNode) : false
+        const caret = rangeCount ? selection!.getRangeAt(0).getBoundingClientRect() : null
+        const state = {
+          isCollapsed,
+          rangeCount,
+          containsAnchor,
+          caretHeight: caret?.height ?? 0,
+          caretTop: caret?.top ?? 0,
+          caretBottom: caret?.bottom ?? 0,
+          viewportTop: viewport.top,
+          viewportBottom: viewport.bottom,
+          scrollTop: scrollable instanceof HTMLElement ? scrollable.scrollTop : 0,
+          scrollHeight: scrollable instanceof HTMLElement ? scrollable.scrollHeight : 0,
+        }
+        const reason = !selection
+          ? "no-selection"
+          : !isCollapsed
+            ? "not-collapsed"
+            : !rangeCount
+              ? "no-range"
+              : !containsAnchor
+                ? "anchor-outside"
+                : state.caretHeight <= 0
+                  ? "zero-height"
+                  : state.caretTop < state.viewportTop - 1
+                    ? "above-viewport"
+                    : state.caretBottom > state.viewportBottom + 1
+                      ? "below-viewport"
+                      : "pass"
+        return { ...state, reason }
+      })
+      samples.push({ ms: Date.now() - start, ...sample })
+      return sample.reason
+    })
     .toBe("pass")
+    .catch((error: Error) => {
+      const summary =
+        samples.length > 10
+          ? [...samples.slice(0, 5), { gap: samples.length - 10 }, ...samples.slice(-5)]
+          : samples
+      throw new Error(`${error.message}\n${JSON.stringify(summary)}`)
+    })
 }
 
 for (const width of [390, 1280]) {

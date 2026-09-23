@@ -184,23 +184,34 @@ test("routes typing to the composer unless the open terminal is focused", async 
     .toBe("BODY")
   await page.keyboard.type("a")
 
-  // Identity poll names the focused element and the focus moves on failure.
-  await expect
-    .poll(
-      () =>
-        composer.evaluate((editor) => {
-          const element = document.activeElement
-          if (element === editor) return "composer"
-          const moves = (window as Window & { __focusMoves?: string[] }).__focusMoves ?? []
-          const focused = element
-            ? `${element.tagName.toLowerCase()} role=${element.getAttribute("role")} text=${element.textContent?.slice(0, 40)}`
-            : "none"
-          return `${focused} after focusin ${moves.join(" > ") || "(none)"}`
-        }),
-      { timeout: 10_000 },
-    )
-    .toBe("composer")
-  await expect(composer).toHaveText("a")
+  // toHaveText checks keystroke routing and toBeFocused the focus state; either failure reports the focused element,
+  // composer identity checks and the focusin sequence since the blur.
+  const focusState = () =>
+    page.evaluate(() => {
+      const active = document.activeElement
+      const composer = document.querySelector('[data-component="composer-editor"]')
+      return {
+        activeTag: active?.tagName ?? "null",
+        activeRole: active?.getAttribute("role") ?? "null",
+        activeId: active?.id ?? "",
+        activeClass: typeof active?.className === "string" ? active.className.slice(0, 60) : "",
+        activeDataComponent: active?.getAttribute("data-component") ?? "null",
+        activeContentEditable: active?.getAttribute("contenteditable") ?? "null",
+        preventAutofocus: !!active?.closest("[data-prevent-autofocus]"),
+        composerExists: !!composer,
+        composerCount: document.querySelectorAll('[data-component="composer-editor"]').length,
+        identityMatch: active === composer,
+        containsMatch: composer?.contains(active) ?? false,
+        dataComponentMatch: active?.getAttribute("data-component") === "composer-editor",
+        composerText: composer?.textContent ?? "",
+        focusMoves: (window as Window & { __focusMoves?: string[] }).__focusMoves ?? [],
+      }
+    })
+  const report = async (error: Error) => {
+    throw new Error(`${error.message}\n${JSON.stringify(await focusState())}`)
+  }
+  await expect(composer).toHaveText("a").catch(report)
+  await expect(composer).toBeFocused().catch(report)
 })
 
 test("keeps composer focus when a cached terminal finishes mounting", async ({ page }) => {

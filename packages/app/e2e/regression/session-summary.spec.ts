@@ -55,6 +55,15 @@ for (const custom of [false, true]) {
       ;(window as any).__tooltipLog = log
     })
 
+    // Tooltip state-machine messages (window.__tooltipDebug) are collected for the tooltip assertion's failure message.
+    await page.evaluate(() => {
+      ;(window as any).__tooltipDebug = true
+    })
+    const tooltipDebug: string[] = []
+    page.on("console", (msg) => {
+      if (msg.text().includes("[Tooltip]")) tooltipDebug.push(msg.text().slice(0, 300))
+    })
+
     // Capture the trigger rect and pointer path; with the event log they are the tooltip assertion's failure message.
     const triggerRect = await trigger.boundingBox()
     await page.evaluate(() => {
@@ -81,7 +90,7 @@ for (const custom of [false, true]) {
             tooltipLog: (window as any).__tooltipLog ?? [],
           }
         })
-        throw new Error(`${error.message}\n${JSON.stringify({ triggerRect, ...recorded })}`)
+        throw new Error(`${error.message}\n${JSON.stringify({ triggerRect, ...recorded, tooltipDebug })}`)
       })
     await page.evaluate(() => (window as any).__pointerCleanup?.())
     await expect(tooltip).toContainText("Summary")

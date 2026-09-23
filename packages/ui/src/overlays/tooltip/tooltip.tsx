@@ -35,7 +35,16 @@ export function Tooltip(props: TooltipProps) {
     "value",
   ])
 
-  const close = () => setState("open", false)
+  const debug = () => typeof window !== "undefined" && (window as any).__tooltipDebug
+  const log = (method: string, detail: Record<string, unknown>) => {
+    if (!debug()) return
+    console.log(`[Tooltip] ${method}`, { ...detail, block: state.block, expand: state.expand, open: state.open })
+  }
+
+  const close = () => {
+    log("close", {})
+    setState("open", false)
+  }
   const controlled = () => local.forceOpen !== undefined
 
   const inside = () => {
@@ -46,13 +55,17 @@ export function Tooltip(props: TooltipProps) {
 
   const drop = (expand = state.expand) => {
     if (expand || !state.block) return
-    if (ref?.matches(":hover")) return
-    if (inside()) return
+    const hover = ref?.matches(":hover") ?? false
+    const focus = inside()
+    log("drop", { expand, hover, focus, willClear: !hover && !focus })
+    if (hover) return
+    if (focus) return
     setState("block", false)
   }
 
   const sync = () => {
     const expand = !!ref?.querySelector('[aria-expanded="true"], [data-expanded]')
+    log("sync", { expand, prevExpand: state.expand })
     setState("expand", expand)
     if (expand) {
       setState("block", true)
@@ -63,12 +76,15 @@ export function Tooltip(props: TooltipProps) {
   }
 
   const arm = () => {
+    log("arm", {})
     setState("block", true)
     close()
   }
 
   const leave = () => {
-    if (!inside()) close()
+    const focus = inside()
+    log("leave", { focus })
+    if (!focus) close()
     drop()
   }
 
@@ -101,11 +117,16 @@ export function Tooltip(props: TooltipProps) {
           open={controlled() ? local.forceOpen : state.open}
           onOpenChange={(open) => {
             if (controlled()) return
-            if (state.block && open) return
+            if (state.block && open) {
+              log("onOpenChange blocked", { requestedOpen: open })
+              return
+            }
             if (justClickedTrigger) {
+              log("onOpenChange justClickedTrigger", { requestedOpen: open })
               justClickedTrigger = false
               return
             }
+            log("onOpenChange", { requestedOpen: open })
             setState("open", open)
           }}
         >
