@@ -122,8 +122,14 @@ for (const device of ["Pixel 7", "iPhone 13"]) {
             .poll(() => row.evaluate((element) => element.getBoundingClientRect().height))
             .toBe(heights[index] + 600)
         }
+        // Scroll state is the failure message: it separates anchor drift from an unapplied height change.
+        const scrollState = () =>
+          reading.scroller.evaluate((root) => ({ scrollTop: root.scrollTop, scrollHeight: root.scrollHeight }))
         await testInfo.attach("images-held.png", { body: await page.screenshot(), contentType: "image/png" })
-        expect(await reading.anchor.evaluate((element) => element.getBoundingClientRect().top)).toBeCloseTo(before, 0)
+        expect(
+          await reading.anchor.evaluate((element) => element.getBoundingClientRect().top),
+          JSON.stringify({ ...(await scrollState()), before }),
+        ).toBeCloseTo(before, 0)
         for (let step = 1; step <= 21; step++) {
           await devtools.send("Input.dispatchTouchEvent", {
             type: "touchMove",
@@ -135,10 +141,10 @@ for (const device of ["Pixel 7", "iPhone 13"]) {
         }
         await devtools.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] })
         await expect(reading.timeline.locator('[data-orientation="vertical"][data-visible="false"]')).toHaveCount(1)
-        expect(await reading.anchor.evaluate((element) => element.getBoundingClientRect().top)).toBeCloseTo(
-          before + 615,
-          0,
-        )
+        expect(
+          await reading.anchor.evaluate((element) => element.getBoundingClientRect().top),
+          JSON.stringify({ ...(await scrollState()), before }),
+        ).toBeCloseTo(before + 615, 0)
       })
     }
 

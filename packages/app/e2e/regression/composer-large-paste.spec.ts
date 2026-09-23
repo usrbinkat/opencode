@@ -88,17 +88,25 @@ for (const lines of [6000, 25000]) {
 }
 
 async function expectCaretVisible(input: Locator) {
+  // The poll returns the first failing condition, so a failure names why the caret is not visible.
   await expect
     .poll(() =>
       input.evaluate((element) => {
         const selection = window.getSelection()
-        if (!selection?.isCollapsed || !selection.rangeCount || !element.contains(selection.anchorNode)) return false
+        if (!selection) return "no-selection"
+        if (!selection.isCollapsed) return "not-collapsed"
+        if (!selection.rangeCount) return "no-range"
+        if (!element.contains(selection.anchorNode)) return "anchor-outside"
         const caret = selection.getRangeAt(0).getBoundingClientRect()
         const viewport = (element.closest("[data-scrollable]") ?? element).getBoundingClientRect()
-        return caret.height > 0 && caret.top >= viewport.top - 1 && caret.bottom <= viewport.bottom + 1
+        if (caret.height <= 0) return "zero-height"
+        if (caret.top < viewport.top - 1) return `above-viewport caret=${caret.top} viewport=${viewport.top}`
+        if (caret.bottom > viewport.bottom + 1)
+          return `below-viewport caret=${caret.bottom} viewport=${viewport.bottom}`
+        return "pass"
       }),
     )
-    .toBe(true)
+    .toBe("pass")
 }
 
 for (const width of [390, 1280]) {
