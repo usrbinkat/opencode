@@ -214,20 +214,34 @@ jobs:
         working-directory: services/www
         run: bun run check:generated
 
-  # ── Parallel job 5: e2e browser tests (Linux + Windows) ────────────
+  # ── Parallel job 5: e2e browser tests (sharded, Linux + Windows) ───
   e2e:
-    name: end-to-end browser test ${{ matrix.settings.name }}
+    name: e2e ${{ matrix.settings.name }}
     needs: affected
     strategy:
       fail-fast: false
       matrix:
         settings:
-          - name: linux
+          - name: linux-1/4
             host: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
-          - name: windows
+            shard: 1/4
+          - name: linux-2/4
+            host: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
+            shard: 2/4
+          - name: linux-3/4
+            host: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
+            shard: 3/4
+          - name: linux-4/4
+            host: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
+            shard: 4/4
+          - name: windows-1/2
             host: ${{ vars.RUNNER_WINDOWS || 'windows-2025' }}
+            shard: 1/2
+          - name: windows-2/2
+            host: ${{ vars.RUNNER_WINDOWS || 'windows-2025' }}
+            shard: 2/2
     runs-on: ${{ matrix.settings.host }}
-    timeout-minutes: 45
+    timeout-minutes: 20
     env:
       E2E_ENABLED: ${{ github.ref_name == 'v2' || needs.affected.outputs.app == 'true' }}
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright-browsers
@@ -251,16 +265,11 @@ jobs:
 
       - name: Run app e2e tests against production build
         if: env.E2E_ENABLED == 'true'
-        run: bun --cwd packages/app test:e2e:built
+        working-directory: packages/app
+        run: PLAYWRIGHT_BUILD=1 bunx playwright test --shard=${{ matrix.settings.shard }}
         env:
           CI: true
-        timeout-minutes: 30
-
-      - name: Verify service worker precaching and upgrades
-        if: env.E2E_ENABLED == 'true'
-        working-directory: packages/app
-        run: bunx playwright test --config e2e/service-worker/playwright.config.ts
-        timeout-minutes: 5
+        timeout-minutes: 20
 
       - name: Upload Playwright artifacts
         if: always() && env.E2E_ENABLED == 'true'
@@ -273,17 +282,58 @@ jobs:
             packages/app/e2e/test-results
             packages/app/e2e/playwright-report
 
+  # ── Parallel job 6: service worker tests (Linux + Windows) ──────────
+  service-worker:
+    name: service worker ${{ matrix.settings.name }}
+    needs: affected
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - name: linux
+            host: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
+          - name: windows
+            host: ${{ vars.RUNNER_WINDOWS || 'windows-2025' }}
+    runs-on: ${{ matrix.settings.host }}
+    timeout-minutes: 10
+    env:
+      E2E_ENABLED: ${{ github.ref_name == 'v2' || needs.affected.outputs.app == 'true' }}
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright-browsers
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.E2E_ENABLED == 'true'
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: ./.github/actions/setup-devshell
+        if: env.E2E_ENABLED == 'true'
+        with:
+          playwright: "true"
+
+      - name: Setup Playwright
+        if: env.E2E_ENABLED == 'true'
+        uses: ./.github/actions/setup-playwright
+
+      - name: Verify service worker precaching and upgrades
+        if: env.E2E_ENABLED == 'true'
+        working-directory: packages/app
+        run: bunx playwright test --config e2e/service-worker/playwright.config.ts
+        timeout-minutes: 5
+
   # ── Gate: all parallel jobs must pass ──────────────────────────────
   results:
     name: test results
     if: always()
-    needs: [lint, test, verify-build, verify-generated, e2e]
+    needs: [lint, test, verify-build, verify-generated, e2e, service-worker]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Check job results
         run: |
-          results=("$LINT" "$TEST" "$VERIFY_BUILD" "$VERIFY_GENERATED" "$E2E")
+          results=("$LINT" "$TEST" "$VERIFY_BUILD" "$VERIFY_GENERATED" "$E2E" "$SERVICE_WORKER")
           for result in "${results[@]}"; do
             if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
               echo "One or more jobs failed or were cancelled"
@@ -297,3 +347,4 @@ jobs:
           VERIFY_BUILD: ${{ needs.verify-build.result }}
           VERIFY_GENERATED: ${{ needs.verify-generated.result }}
           E2E: ${{ needs.e2e.result }}
+          SERVICE_WORKER: ${{ needs.service-worker.result }}
