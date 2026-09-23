@@ -10,5 +10,5 @@ in
   aarch64-darwin = "ac7194a3dfd81930ba35355c01620262c1254752859b42dcb8f4b9e4d174a871";
   x86_64-darwin = "4489aba55477a0082266cb690db1c829503ba3338048599d8fd243953df37dab";
   # fetchzip hashes the unpacked headers, not the release tarball.
-  headers = "sha256-4eUy3BZVvxTl7KUOsxio7769lL6ag/ecbeK+qLURWMI=";
+  headers = "sha256-QPkX+99kArlQhhbgOZe+Hsk28G5cadkUy0G0cIDtEh8=";
 }

@@ -120,10 +120,11 @@
         pkgs:
         let
           opencode = pkgs.callPackage ./nix/opencode.nix { inherit rev; };
+          opencode-desktop = pkgs.callPackage ./nix/desktop.nix { inherit opencode; };
         in
         {
           # Build succeeds and version string matches
-          inherit opencode;
+          inherit opencode opencode-desktop;
 
           # Runtime version check
           opencode-version =
