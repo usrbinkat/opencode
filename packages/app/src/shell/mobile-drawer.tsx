@@ -21,7 +21,18 @@ export function MobileDrawer(
       finalFocusEl={props.returnFocus?.()}
       closeOnOutsideFocus={props.closeOnOutsideFocus}
     >
-      {props.children}
+      {(state: any) => (
+        <div
+          data-slot="mobile-drawer-state"
+          data-drawer-open={state.open}
+          data-drawer-transition-state={state.transitionState ?? "idle"}
+          data-drawer-open-percentage={state.openPercentage?.toFixed(2)}
+          data-drawer-translate={state.translate?.toFixed(1)}
+          data-drawer-content-present={state.contentPresent}
+        >
+          {props.children}
+        </div>
+      )}
     </Drawer>
   )
 }
