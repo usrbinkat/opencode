@@ -43,6 +43,12 @@
   pointer-events: none;
 }
 
+/* @corvu/dialog Overlay sets pointer-events: auto inline (combineStyle in Overlay.tsx).
+   !important is required to override it when the drawer is closed but forceMount keeps the overlay in the DOM. */
+[data-slot="mobile-drawer-overlay"][data-closed] {
+  pointer-events: none !important;
+}
+
 [data-slot="mobile-drawer-handle"] {
   display: flex;
   height: 28px;
