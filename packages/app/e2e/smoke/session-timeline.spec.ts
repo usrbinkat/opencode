@@ -579,6 +579,17 @@ async function expectCanScrollToStart(
     }
   }
 
+  // Deferred rows mount as placeholders and render their parts after mounting (VirtualRow ready/onSizeChange in
+  // session/timeline/virtualizer.tsx), so rows at the start can be mounted before their parts exist. Collect
+  // parts for up to 30 more frames after the traversal settles at the top.
+  for (let settle = 0; settle < 30; settle++) {
+    const next = await timelineState(page)
+    collectSeen(next, seenParts, seenMessages)
+    if (seenParts.size >= expectedPartIDs.length && seenMessages.size >= expectedMessageIDs.length) break
+    if (next.signature !== current.signature) current = next
+    await page.waitForTimeout(16)
+  }
+
   collectSeen(current, seenParts, seenMessages)
   samples.push(sampleTraversal(current, seenParts.size, seenMessages.size))
   expectCompleteScroll(current, expectedPartIDs, expectedMessageIDs, seenParts, seenMessages, samples, exit)

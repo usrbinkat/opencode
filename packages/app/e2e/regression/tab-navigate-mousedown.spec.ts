@@ -150,7 +150,28 @@ test("mobile drawer exposes close controls and navigates between tabs", async ({
     await page.setViewportSize({ width: 1280, height: 720 })
     await expect(tabA.locator("[data-titlebar-tab]")).toHaveAttribute("data-title-overflow", "false")
     await page.setViewportSize({ width: 450, height: 720 })
-    await page.getByRole("button", { name: "Tabs", exact: true }).click()
+    await page
+      .getByRole("button", { name: "Tabs", exact: true })
+      .click()
+      .catch(async (error: Error) => {
+        // A drawer overlay keeps intercepting pointer events if its close never reaches [data-closed].
+        const state = await page.evaluate(() => {
+          const read = (element: Element) => ({
+            ...Object.fromEntries(
+              ["data-open", "data-closing", "data-closed", "data-transitioning"].map((name) => [
+                name,
+                element.getAttribute(name),
+              ]),
+            ),
+            pointerEvents: getComputedStyle(element).pointerEvents,
+          })
+          return {
+            content: [...document.querySelectorAll('[data-slot="mobile-drawer-content"]')].map(read),
+            overlays: [...document.querySelectorAll('[data-slot="mobile-drawer-overlay"]')].map(read),
+          }
+        })
+        throw new Error(`${error.message}\nDrawer state before Tabs click (${direction}): ${JSON.stringify(state)}`)
+      })
   }
 })
 

@@ -118,7 +118,28 @@ for (const position of ["top", "bottom"] as const) {
     await expect(details.getByRole("button", { name: "No changes", exact: true })).toBeVisible()
     await expect(details).not.toHaveAttribute("data-transitioning")
     await page.keyboard.press("Escape")
-    await expect(details).toBeHidden()
+    await expect(details)
+      .toBeHidden()
+      .catch(async (error: Error) => {
+        // Drawer content hides only at [data-closed] (mobile-drawer.css); a close stalled mid-transition stays visible.
+        const state = await page.evaluate(() => {
+          const read = (element: Element) =>
+            Object.fromEntries(
+              ["data-open", "data-closing", "data-closed", "data-transitioning", "aria-hidden"].map((name) => [
+                name,
+                element.getAttribute(name),
+              ]),
+            )
+          return {
+            content: [...document.querySelectorAll('[data-slot="mobile-drawer-content"]')].map(read),
+            overlays: [...document.querySelectorAll('[data-slot="mobile-drawer-overlay"]')].map((element) => ({
+              ...read(element),
+              pointerEvents: getComputedStyle(element).pointerEvents,
+            })),
+          }
+        })
+        throw new Error(`${error.message}\nDrawer state after Escape: ${JSON.stringify(state)}`)
+      })
     await expect(more).toBeFocused()
     await more.click()
     await page.getByRole("menuitem", { name: "Session details", exact: true }).click()
