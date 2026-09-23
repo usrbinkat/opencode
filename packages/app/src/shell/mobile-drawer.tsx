@@ -31,9 +31,9 @@ export const MobileDrawerTrigger = Drawer.Trigger
 export function MobileDrawerContent(props: ParentProps) {
   const language = useLanguage()
   return (
-    <Drawer.Portal forceMount>
+    <Drawer.Portal>
       <Drawer.Overlay data-slot="mobile-drawer-overlay" />
-      <Drawer.Content forceMount data-slot="mobile-drawer-content" dir={language.direction()}>
+      <Drawer.Content data-slot="mobile-drawer-content" dir={language.direction()}>
         <div data-slot="mobile-drawer-handle" aria-hidden="true">
           <span />
         </div>
