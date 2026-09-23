@@ -94,7 +94,7 @@ it.live("service CORS config rejects empty lists, invalid origins, and extra arg
 )
 
 test.each([
-  { args: [], cors: [] },
+  { args: ["--"], cors: [] },
   { args: ["--cors", "https://app.example.com"], cors: ["https://app.example.com"] },
   {
     args: ["--service", "--cors", "http://192.0.2.10:3001", "--cors", "https://app.example.com"],
