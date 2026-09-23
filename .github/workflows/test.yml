@@ -40,9 +40,6 @@ jobs:
           CURRENT_RUN_ID: ${{ github.run_id }}
         shell: bash
         run: |
-          # Query the most recent completed run of this workflow on this branch,
-          # excluding the current run. If it failed, downstream jobs should not
-          # skip — unresolved failures need retesting regardless of what changed.
           runs=$(gh api \
             "repos/${{ github.repository }}/actions/workflows/test.yml/runs?branch=${{ github.ref_name }}&status=completed&per_page=5" \
             --jq '.workflow_runs' 2>/dev/null || echo "[]")
@@ -69,8 +66,31 @@ jobs:
           bun turbo ls --affected --filter=@opencode/app --output=json > affected.json
           bun -e 'const result = await Bun.file("affected.json").json(); console.log(`app=${result.packages.count > 0}`)' >> "$GITHUB_OUTPUT"
 
-  unit:
-    name: build and test ${{ matrix.settings.name }}
+  # ── Parallel job 1: Effect lint rules (Linux only) ─────────────────
+  lint:
+    name: lint
+    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup-devshell
+
+      - name: Test Effect simplification rules
+        run: bun run test:effect-simplification-rules
+
+      - name: Check Effect patterns
+        run: bun run lint:effect-patterns
+
+      - name: Check Effect simplifications
+        run: bun run lint:effect-simplifications
+
+  # ── Parallel job 2: unit tests (Linux + Windows) ───────────────────
+  test:
+    name: test ${{ matrix.settings.name }}
     strategy:
       fail-fast: false
       matrix:
@@ -80,7 +100,7 @@ jobs:
           - name: windows
             host: ${{ vars.RUNNER_WINDOWS || 'windows-2025' }}
     runs-on: ${{ matrix.settings.host }}
-    timeout-minutes: 30
+    timeout-minutes: 20
     defaults:
       run:
         shell: bash
@@ -92,26 +112,13 @@ jobs:
 
       - uses: ./.github/actions/setup-devshell
 
-      - name: Test Effect simplification rules
-        if: runner.os == 'Linux'
-        run: bun run test:effect-simplification-rules
-
-      - name: Check Effect patterns
-        if: runner.os == 'Linux'
-        run: bun run lint:effect-patterns
-
-      - name: Check Effect simplifications
-        if: runner.os == 'Linux'
-        run: bun run lint:effect-simplifications
-
       - uses: ./.github/actions/setup-git-identity
 
       - uses: ./.github/actions/setup-turbo-cache
 
       - name: Run unit tests
-        timeout-minutes: 20
+        timeout-minutes: 15
         run: |
-          # The runners have four vCPUs, and each Bun test process performs its own concurrent work.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             GITHUB_ACTIONS=false bun turbo test --concurrency=3
             exit 0
@@ -121,6 +128,30 @@ jobs:
           OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: ${{ runner.os == 'Windows' && 'true' || 'false' }}
           TURBO_SCM_BASE: ${{ github.event_name == 'pull_request' && format('{0}^1', github.sha) || github.event.before }}
           TURBO_SCM_HEAD: ${{ github.sha }}
+
+  # ── Parallel job 3: build verification (Linux + Windows) ───────────
+  verify-build:
+    name: verify build ${{ matrix.settings.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - name: linux
+            host: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
+          - name: windows
+            host: ${{ vars.RUNNER_WINDOWS || 'windows-2025' }}
+    runs-on: ${{ matrix.settings.host }}
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup-devshell
 
       - name: Verify published codemode package
         if: runner.os == 'Linux'
@@ -141,7 +172,6 @@ jobs:
           TURBO_SCM_HEAD: ${{ github.sha }}
 
       - name: Verify compiled service lifecycle
-        if: always()
         timeout-minutes: 10
         working-directory: packages/cli
         env:
@@ -151,12 +181,10 @@ jobs:
           bun run script/service-smoke.ts
 
       - uses: ./.github/actions/setup-devshell
-        if: always()
         with:
           node-sea: "true"
 
       - name: Verify Node build
-        if: always()
         timeout-minutes: 15
         working-directory: packages/cli
         env:
@@ -165,16 +193,28 @@ jobs:
           bun run script/build-node.ts --single --skip-install --outdir=dist/node
           bun run script/service-smoke.ts --node
 
+  # ── Parallel job 4: generated code checks (Linux only) ─────────────
+  verify-generated:
+    name: verify generated
+    runs-on: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - uses: ./.github/actions/setup-devshell
+
       - name: Check generated client
-        if: runner.os == 'Linux'
         working-directory: packages/client
         run: bun run check:generated
 
       - name: Check generated documentation
-        if: runner.os == 'Linux'
         working-directory: services/www
         run: bun run check:generated
 
+  # ── Parallel job 5: e2e browser tests (Linux + Windows) ────────────
   e2e:
     name: end-to-end browser test ${{ matrix.settings.name }}
     needs: affected
@@ -189,7 +229,6 @@ jobs:
     runs-on: ${{ matrix.settings.host }}
     timeout-minutes: 45
     env:
-      # Always run e2e on the v2 branch, gate on affected detection elsewhere.
       E2E_ENABLED: ${{ github.ref_name == 'v2' || needs.affected.outputs.app == 'true' }}
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright-browsers
     defaults:
@@ -233,3 +272,28 @@ jobs:
           path: |
             packages/app/e2e/test-results
             packages/app/e2e/playwright-report
+
+  # ── Gate: all parallel jobs must pass ──────────────────────────────
+  results:
+    name: test results
+    if: always()
+    needs: [lint, test, verify-build, verify-generated, e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check job results
+        run: |
+          results=("$LINT" "$TEST" "$VERIFY_BUILD" "$VERIFY_GENERATED" "$E2E")
+          for result in "${results[@]}"; do
+            if [ "$result" = "failure" ] || [ "$result" = "cancelled" ]; then
+              echo "One or more jobs failed or were cancelled"
+              exit 1
+            fi
+          done
+          echo "All jobs passed"
+        env:
+          LINT: ${{ needs.lint.result }}
+          TEST: ${{ needs.test.result }}
+          VERIFY_BUILD: ${{ needs.verify-build.result }}
+          VERIFY_GENERATED: ${{ needs.verify-generated.result }}
+          E2E: ${{ needs.e2e.result }}
