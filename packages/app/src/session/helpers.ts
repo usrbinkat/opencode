@@ -123,13 +123,17 @@ export const focusTerminalById = (id: string) => {
     return true
   }
 
+  // The ghostty WASM textarea has not mounted yet: focus the terminal element for
+  // selection feedback and report that it cannot take input. Callers do not branch on
+  // this result; focus requests stay pending because they are only consumed once the
+  // textarea exists (Terminal onAutoFocus and onConnect run after term.open).
   terminal.focus({ preventScroll: true })
   terminal.dispatchEvent(
     typeof PointerEvent === "function"
       ? new PointerEvent("pointerdown", { bubbles: true, cancelable: true })
       : new MouseEvent("pointerdown", { bubbles: true, cancelable: true }),
   )
-  return true
+  return false
 }
 
 export const createOpenReviewFile = (input: {

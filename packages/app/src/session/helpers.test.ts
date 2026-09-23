@@ -104,7 +104,7 @@ describe("focusTerminalById", () => {
     expect(document.activeElement?.tagName).toBe("TEXTAREA")
   })
 
-  test("falls back to terminal element focus", () => {
+  test("focuses terminal element for visual feedback but reports not input-ready when textarea is absent", () => {
     document.body.innerHTML = `<div id="terminal-wrapper-two"><div data-component="terminal" tabindex="0"></div></div>`
     const terminal = document.querySelector('[data-component="terminal"]') as HTMLElement
     let pointerDown = false
@@ -114,7 +114,7 @@ describe("focusTerminalById", () => {
 
     const focused = focusTerminalById("two")
 
-    expect(focused).toBe(true)
+    expect(focused).toBe(false)
     expect(document.activeElement).toBe(terminal)
     expect(pointerDown).toBe(true)
   })

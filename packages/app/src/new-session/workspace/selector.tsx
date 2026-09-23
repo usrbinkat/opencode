@@ -49,8 +49,11 @@ export function PromptWorkspaceSelector(props: {
   const select = (value: string) => {
     pending = { type: "select", value }
   }
+  // True when the menu closed on a choice, so focus returns to the caller's surface instead of the trigger.
+  let resume = false
   const onOpenChange = (open: boolean) => {
     if (open) {
+      resume = false
       setSearch({ workspaces: "", branches: "" })
       props.onSearch("")
       return
@@ -59,10 +62,14 @@ export function PromptWorkspaceSelector(props: {
     pending = undefined
     if (action?.type === "select") props.onChange(action.value)
     if (action?.type === "create") props.onCreate(action.branch)
-    if (action?.type === "viewAll") {
-      props.onViewAll()
-      return
-    }
+    if (action?.type === "viewAll") props.onViewAll()
+    resume = action?.type === "select" || action?.type === "create"
+  }
+  // Kobalte calls this from the content's unmount task, then focuses the trigger itself. A dismissal
+  // therefore leaves focus on the trigger; after a choice, onDone schedules its focus behind that write.
+  const onCloseAutoFocus = () => {
+    if (!resume) return
+    resume = false
     props.onDone?.()
   }
   const label = () => {
@@ -131,7 +138,7 @@ export function PromptWorkspaceSelector(props: {
             />
           </Menu.Trigger>
           <Menu.Portal>
-            <Menu.Content class="w-[200px]">
+            <Menu.Content class="w-[200px]" onCloseAutoFocus={onCloseAutoFocus}>
               <Menu.Group>
                 <Menu.GroupLabel>{language.t("session.new.workspace.runIn")}</Menu.GroupLabel>
                 <Menu.Item onSelect={() => select("main")}>
@@ -305,6 +312,7 @@ export function PromptWorkspaceSelector(props: {
                   // Kobalte defers its list autofocus until after the focus scope opens.
                   setTimeout(() => requestAnimationFrame(() => branchSearchInput?.focus({ preventScroll: true })))
                 }}
+                onCloseAutoFocus={onCloseAutoFocus}
               >
                 <div class="flex h-7 shrink-0 items-center gap-2 rounded-sm pl-3 pr-2.5 text-v2-icon-icon-muted">
                   <Icon name="magnifying-glass" size="small" class="shrink-0" />
