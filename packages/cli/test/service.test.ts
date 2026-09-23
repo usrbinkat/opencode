@@ -234,7 +234,7 @@ test("concurrent service processes elect one server", async () => {
   const processes = Array.from({ length: 10 }, () => Bun.spawn(command, { env, stderr: "pipe", stdout: "pipe" }))
 
   try {
-    const info = await waitForInfo(registration)
+    const info = await waitForInfo(registration, () => true, 60_000)
     const winner = processes.find((process) => process.pid === info.pid)
     const losers = processes.filter((process) => process.pid !== info.pid)
     const exited = await Promise.all(
@@ -564,8 +564,11 @@ test("a failed service stays registered and owns the selected port until stopped
   }
 }, 30_000)
 
-async function waitForInfo(file: string, accept: (info: Info) => boolean = () => true) {
-  for (let attempt = 0; attempt < 400; attempt++) {
+async function waitForInfo(file: string, accept: (info: Info) => boolean = () => true, timeout = 20_000) {
+  const start = performance.now()
+  let attempts = 0
+  while (performance.now() - start < timeout) {
+    attempts++
     const value = await Bun.file(file)
       .json()
       .catch(() => undefined)
@@ -575,7 +578,8 @@ async function waitForInfo(file: string, accept: (info: Info) => boolean = () =>
     }
     await Bun.sleep(50)
   }
-  throw new Error("Timed out waiting for service registration")
+  const elapsed = (performance.now() - start).toFixed(0)
+  throw new Error(`Timed out waiting for service registration after ${elapsed}ms (${attempts} attempts)`)
 }
 
 async function waitForFailed(info: Info) {

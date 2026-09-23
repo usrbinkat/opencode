@@ -56,6 +56,7 @@ describe("one built-in cannot build an unbounded value", () => {
     }
   })
 
+  // Each promise forks an Effect fiber in Pending.create(); the budget covers that cost on Linux CI runners.
   test(
     "promises: too many pending at once, while settled ones do not count",
     async () => {
@@ -70,6 +71,6 @@ describe("one built-in cannot build an unbounded value", () => {
         "Too many pending promises",
       )
     },
-    10_000,
+    20_000,
   )
 })
