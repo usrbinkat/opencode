@@ -209,7 +209,6 @@ export const Terminal = (props: TerminalProps) => {
   const scrollY = typeof local.pty.scrollY === "number" ? local.pty.scrollY : undefined
   let ws: WebSocket | undefined
   let term: Term | undefined
-  let _ghostty: Ghostty
   let serializeAddon: SerializeAddon
   let fitAddon: FitAddon
   let handleResize: () => void
@@ -411,7 +410,6 @@ export const Terminal = (props: TerminalProps) => {
         cleanup()
         return
       }
-      _ghostty = g
       term = t
       setOptionIfSupported(t, "colorScheme", theme.mode() === "dark" ? "dark" : "light")
       output = terminalWriter((data, done) =>
@@ -430,7 +428,8 @@ export const Terminal = (props: TerminalProps) => {
         }
 
         if (event.ctrlKey && event.shiftKey && !event.metaKey && key === "c") {
-          document.execCommand("copy")
+          const selection = t.getSelection()
+          if (selection) void navigator.clipboard.writeText(selection)
           return true
         }
 
