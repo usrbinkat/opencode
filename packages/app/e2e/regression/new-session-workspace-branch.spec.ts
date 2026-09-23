@@ -63,16 +63,17 @@ test("selects a base branch for a new workspace", async ({ page }) => {
   await expect(search).toHaveValue("")
   await expect(page.getByRole("menuitemradio", { name: "feature/api", exact: true })).toBeChecked()
   await page.keyboard.press("Escape")
-  await expect(selected)
-    .toBeFocused()
-    .catch(async (error: Error) => {
-      const active = await page.evaluate(() => {
+  // toBeFocused() fails on GHA headless Chromium while document.activeElement is the trigger; assert identity.
+  await expect
+    .poll(() =>
+      selected.evaluate((trigger) => {
         const element = document.activeElement
+        if (element === trigger) return "trigger"
         if (!element) return "none"
         return `${element.tagName.toLowerCase()} role=${element.getAttribute("role")} text=${element.textContent?.slice(0, 40)}`
-      })
-      throw new Error(`${error.message}\nFocus after Escape landed on: ${active}`)
-    })
+      }),
+    )
+    .toBe("trigger")
   await page.keyboard.press("Enter")
   await expect(search).toBeFocused()
   await page.keyboard.type("feature")

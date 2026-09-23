@@ -89,9 +89,13 @@ test("clears the terminal line with Command+Delete", async ({ page }) => {
   await expect(terminal.locator("textarea")).toHaveCount(1)
   await expect.poll(() => sendPtyOutput).toBeDefined()
 
+  // App mapping (terminalKeyInput): Command/Meta+Delete kills the line on every platform.
   await page.keyboard.press("Meta+Backspace")
-
   await expect.poll(() => ptyInput.join("")).toBe("\x15")
+
+  // Terminal line-kill passthrough: Ctrl+U reaches the PTY unchanged on every platform.
+  await page.keyboard.press("Control+u")
+  await expect.poll(() => ptyInput.join("")).toBe("\x15\x15")
 })
 
 test("hides the native contenteditable caret", async ({ page }) => {

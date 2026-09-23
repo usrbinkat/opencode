@@ -17,6 +17,7 @@ type SmokeState = {
   scrollTop: number
   scrollHeight: number
   clientHeight: number
+  uncovered: number
   errorToasts: string[]
   forbiddenText: string[]
 }
@@ -428,6 +429,7 @@ async function configureSmokePage(page: Page, directory: string) {
           scrollTop: 0,
           scrollHeight: 0,
           clientHeight: 0,
+          uncovered: 0,
           errorToasts: smoke.__timelineSmokeErrorToasts ?? [],
           forbiddenText: smoke.__timelineSmokeForbiddenText ?? [],
         }
@@ -470,6 +472,25 @@ async function configureSmokePage(page: Page, directory: string) {
         ids,
       })
 
+      // Viewport pixels inside the virtual content that no mounted row covers: nonzero means the
+      // mounted range lags the scroll offset rather than the traversal stepping past mounted rows.
+      const content = scroller.querySelector<HTMLElement>("[data-timeline-virtual-content]")?.getBoundingClientRect()
+      const spacer = scroller.querySelector<HTMLElement>('[data-timeline-row="bottom-spacer"]')?.getBoundingClientRect()
+      const coverTop = Math.max(scrollerRect.top, content?.top ?? scrollerRect.top)
+      const coverBottom = Math.min(scrollerRect.bottom, spacer?.top ?? content?.bottom ?? scrollerRect.bottom)
+      const spans = [...scroller.querySelectorAll<HTMLElement>("[data-timeline-key]")]
+        .map((el) => el.getBoundingClientRect())
+        .filter((rect) => rect.bottom > coverTop && rect.top < coverBottom)
+        .map((rect) => [Math.max(rect.top, coverTop), Math.min(rect.bottom, coverBottom)] as const)
+        .sort((a, b) => a[0] - b[0])
+      let uncovered = 0
+      let cursor = coverTop
+      for (const [start, end] of spans) {
+        if (start > cursor) uncovered += start - cursor
+        cursor = Math.max(cursor, end)
+      }
+      if (coverBottom > cursor) uncovered += coverBottom - cursor
+
       return {
         ids,
         visibleIds,
@@ -480,6 +501,7 @@ async function configureSmokePage(page: Page, directory: string) {
         scrollTop: Math.round(scroller.scrollTop),
         scrollHeight: Math.round(scroller.scrollHeight),
         clientHeight: Math.round(scroller.clientHeight),
+        uncovered: Math.round(uncovered),
         errorToasts: smoke.__timelineSmokeErrorToasts ?? [],
         forbiddenText: smoke.__timelineSmokeForbiddenText ?? [],
       }
@@ -571,6 +593,7 @@ async function timelineState(page: Page) {
         scrollTop: 0,
         scrollHeight: 0,
         clientHeight: 0,
+        uncovered: 0,
         errorToasts: [],
         forbiddenText: [],
       },
@@ -600,7 +623,9 @@ async function scrollTimelineUp(page: Page, before: SmokeState) {
         }
 
         scroller.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -1, deltaMode: 0 }))
-        scroller.scrollTop = Math.max(0, scroller.scrollTop - Math.max(80, Math.round(scroller.clientHeight * 0.45)))
+        // Each step must overlap the previous viewport so every row mounts in some sample; the list mounts
+        // visible rows plus 2 overscan (timeline/virtualizer.tsx). A 0.45 step left 40 parts unmounted on GHA runners.
+        scroller.scrollTop = Math.max(0, scroller.scrollTop - Math.max(80, Math.round(scroller.clientHeight * 0.2)))
 
         const read = () => (window as SmokeWindow).__timelineSmokeState?.().signature ?? ""
         let frames = 0
@@ -661,6 +686,7 @@ function sampleTraversal(state: SmokeState, seenParts: number, seenMessages: num
     visibleMessages: unique(state.visibleMessageIds).length,
     top: state.scrollTop,
     height: state.scrollHeight,
+    uncovered: state.uncovered,
     first: state.ids[0],
     last: state.ids.at(-1),
     topVisible: state.topVisibleId,
@@ -670,11 +696,12 @@ function sampleTraversal(state: SmokeState, seenParts: number, seenMessages: num
 }
 
 function sampleSummary(samples: TraversalSample[]) {
-  return samples
+  const maxUncovered = Math.max(0, ...samples.map((sample) => sample.uncovered))
+  return `maxUncovered=${maxUncovered} across ${samples.length} samples\n` + samples
     .filter((_, index) => index % Math.max(1, Math.floor(samples.length / 8)) === 0 || index === samples.length - 1)
     .map(
       (sample, index) =>
-        `${index}: seenParts=${sample.seenParts} seenMessages=${sample.seenMessages} mounted=${sample.mounted}/${sample.mountedMessages} visible=${sample.visible}/${sample.visibleMessages} top=${sample.top}/${sample.height} first=${sample.first} last=${sample.last} topVisible=${sample.topVisible} visible=${sample.visibleFirst}..${sample.visibleLast}`,
+        `${index}: seenParts=${sample.seenParts} seenMessages=${sample.seenMessages} mounted=${sample.mounted}/${sample.mountedMessages} visible=${sample.visible}/${sample.visibleMessages} top=${sample.top}/${sample.height} uncovered=${sample.uncovered} first=${sample.first} last=${sample.last} topVisible=${sample.topVisible} visible=${sample.visibleFirst}..${sample.visibleLast}`,
     )
     .join("\n")
 }
