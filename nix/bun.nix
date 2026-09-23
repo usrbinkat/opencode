@@ -2629,9 +2629,9 @@
     url = "https://registry.npmjs.org/@jsx-email/text/-/text-1.0.2.tgz";
     hash = "sha512-0zzwEwrKtY6tfjPJF0r3krKCDpP/ySYDvkn4+MvIFrIH5RZKmn3XDa5o/3hkbxMwpLn4MsXGIXn9XzMTaqTfUA==";
   };
-  "@kobalte/core@0.13.13" = fetchurl {
-    url = "https://registry.npmjs.org/@kobalte/core/-/core-0.13.13.tgz";
-    hash = "sha512-czBC+IQdOgJoW7DJjeh0rht7SPmTPgWsKg7Jo3RHMfwx028WxJtDylx9dJuJuD/GUae15+E4nYafu8LwuixFYQ==";
+  "@kobalte/core@0.13.14" = fetchurl {
+    url = "https://registry.npmjs.org/@kobalte/core/-/core-0.13.14.tgz";
+    hash = "sha512-SBVB1lnvYbYt2x3t7fG0lo5fGLEbHQ6PII3NDPva8vD5e2v53On84ZVQiuIk0XI/55R4GQhden7Yem+R/XR8uQ==";
   };
   "@kobalte/utils@0.9.2" = fetchurl {
     url = "https://registry.npmjs.org/@kobalte/utils/-/utils-0.9.2.tgz";
