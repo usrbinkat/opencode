@@ -148,6 +148,9 @@ test("mobile drawer exposes close controls and navigates between tabs", async ({
     await page.setViewportSize({ width: 450, height: 720 })
     await expect(tabA).toBeVisible()
     await page.setViewportSize({ width: 1280, height: 720 })
+    // Leaving the mobile layout unmounts the drawer; no overlay or content may remain in the document.
+    await expect(page.locator("[data-corvu-drawer-overlay]")).toHaveCount(0)
+    await expect(page.locator("[data-corvu-drawer-content]")).toHaveCount(0)
     await expect(tabA.locator("[data-titlebar-tab]")).toHaveAttribute("data-title-overflow", "false")
     await page.setViewportSize({ width: 450, height: 720 })
     await page

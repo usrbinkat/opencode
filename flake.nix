@@ -109,6 +109,17 @@
       devShells = forEachSystem (pkgs: {
         default = pkgs.mkShell {
           packages = ciPackages pkgs;
+
+          # Playwright browser binaries built by nixpkgs with autoPatchelfHook
+          # link against the Nix store glibc. Without these env vars, bunx
+          # playwright install downloads its own Chromium that links against
+          # the system glibc, which fails inside the devshell with
+          # GLIBC_ABI_GNU2_TLS / GLIBC_ABI_DT_X86_64_PLT symbol errors.
+          shellHook = lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+            export PLAYWRIGHT_BROWSERS_PATH="${pkgs.playwright-driver.browsers}"
+            export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+            export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
+          '';
         };
       });
 
