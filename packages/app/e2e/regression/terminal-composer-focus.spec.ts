@@ -157,17 +157,34 @@ test("routes typing to the composer unless the open terminal is focused", async 
 
   await page.waitForTimeout(300)
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  // Record focus moves after the blur so a failure names what claimed focus, not only where it ended.
+  await page.evaluate(() => {
+    const moves: string[] = []
+    document.addEventListener(
+      "focusin",
+      (event) => {
+        const target = event.target instanceof HTMLElement ? event.target : undefined
+        const component = target?.getAttribute("data-component")
+        moves.push(target ? `${target.tagName.toLowerCase()}${component ? `[data-component=${component}]` : ""}` : "null")
+      },
+      true,
+    )
+    ;(window as Window & { __focusMoves?: string[] }).__focusMoves = moves
+  })
   await page.keyboard.type("a")
 
-  // Identity poll names the focused element on failure.
+  // Identity poll names the focused element and the focus moves on failure.
   await expect
     .poll(
       () =>
         composer.evaluate((editor) => {
           const element = document.activeElement
           if (element === editor) return "composer"
-          if (!element) return "none"
-          return `${element.tagName.toLowerCase()} role=${element.getAttribute("role")} text=${element.textContent?.slice(0, 40)}`
+          const moves = (window as Window & { __focusMoves?: string[] }).__focusMoves ?? []
+          const focused = element
+            ? `${element.tagName.toLowerCase()} role=${element.getAttribute("role")} text=${element.textContent?.slice(0, 40)}`
+            : "none"
+          return `${focused} after focusin ${moves.join(" > ") || "(none)"}`
         }),
       { timeout: 10_000 },
     )

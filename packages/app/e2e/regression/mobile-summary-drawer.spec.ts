@@ -22,7 +22,23 @@ test("summary drawer dismisses and reopens after button, backdrop, Escape, and d
     await expect
       .poll(() => drawer.evaluate((element) => new DOMMatrixReadOnly(getComputedStyle(element).transform).m42))
       .toBe(0)
-    await expect(drawer).not.toHaveAttribute("data-transitioning")
+    await expect(drawer)
+      .not.toHaveAttribute("data-transitioning")
+      .catch(async (error: Error) => {
+        // A transition that never ends leaves data-transitioning set; report what the content is still animating.
+        const state = await drawer.evaluate((element) => {
+          const style = getComputedStyle(element)
+          return {
+            transitionProperty: style.transitionProperty,
+            transitionDuration: style.transitionDuration,
+            transform: style.transform,
+            opening: element.hasAttribute("data-opening"),
+            closing: element.hasAttribute("data-closing"),
+            transitioning: element.hasAttribute("data-transitioning"),
+          }
+        })
+        throw new Error(`${error.message}\nDrawer state before ${dismissal}: ${JSON.stringify(state)}`)
+      })
     if (dismissal === "button") await drawer.getByRole("button", { name: "Close", exact: true }).click()
     if (dismissal === "backdrop") await overlay.click({ position: { x: 10, y: 10 } })
     if (dismissal === "escape") await page.keyboard.press("Escape")
