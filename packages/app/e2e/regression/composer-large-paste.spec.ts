@@ -118,11 +118,36 @@ for (const width of [390, 1280]) {
       const suffix = "\nExisting trailing content".repeat(100)
       await input.fill("Before " + suffix)
       await input.press("ControlOrMeta+Home")
+      // Caret, direction and content snapshots are the paste assertion's failure message.
+      const selectionState = () =>
+        input.evaluate((element) => {
+          const selection = window.getSelection()
+          const content = (element as HTMLElement).innerText
+          return {
+            dir: element.getAttribute("dir"),
+            computedDirection: getComputedStyle(element).direction,
+            docDir: document.documentElement.dir,
+            anchorOffset: selection?.anchorOffset ?? -1,
+            focusOffset: selection?.focusOffset ?? -1,
+            anchorNodeText: selection?.anchorNode?.textContent?.slice(0, 20) ?? "null",
+            isCollapsed: selection?.isCollapsed ?? false,
+            contentFirst20: content.slice(0, 20),
+            contentLast20: content.slice(-20),
+            contentLength: content.length,
+          }
+        })
+      const beforeArrow = await selectionState()
+      // The editor uses dir="auto", which resolves to LTR for Latin text ("Before "), so ArrowRight moves forward
+      // regardless of the document direction.
       await input.press("ArrowRight")
+      const afterArrow = await selectionState()
       const text = "Pasted line /tmp/example.ts 123 \u0645\u0631\u062d\u0628\u0627\n".repeat(100) + "End of paste"
       await page.evaluate((text) => navigator.clipboard.writeText(text), text)
       await page.keyboard.press("ControlOrMeta+V")
-      await expect.poll(() => input.innerText()).toBe("B" + text + "efore " + suffix)
+      const afterPaste = await selectionState()
+      await expect
+        .poll(() => input.innerText(), { message: JSON.stringify({ direction, beforeArrow, afterArrow, afterPaste }) })
+        .toBe("B" + text + "efore " + suffix)
       await expectCaretVisible(input)
       await page.keyboard.type("!")
       await expect.poll(() => input.innerText()).toBe("B" + text + "!efore " + suffix)

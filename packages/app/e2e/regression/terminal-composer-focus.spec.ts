@@ -156,8 +156,7 @@ test("routes typing to the composer unless the open terminal is focused", async 
   await expect(composer).toHaveText("")
 
   await page.waitForTimeout(300)
-  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
-  // Record focus moves after the blur so a failure names what claimed focus, not only where it ended.
+  // Record focus moves from the blur onward so a failure names what claimed focus, not only where it ended.
   await page.evaluate(() => {
     const moves: string[] = []
     document.addEventListener(
@@ -171,6 +170,18 @@ test("routes typing to the composer unless the open terminal is focused", async 
     )
     ;(window as Window & { __focusMoves?: string[] }).__focusMoves = moves
   })
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  // Focus must stay released before typing; a failure names the element that took it back.
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const tag = document.activeElement?.tagName ?? "none"
+        if (tag === "BODY") return tag
+        const moves = (window as Window & { __focusMoves?: string[] }).__focusMoves ?? []
+        return `${tag} after focusin ${moves.join(" > ") || "(none)"}`
+      }),
+    )
+    .toBe("BODY")
   await page.keyboard.type("a")
 
   // Identity poll names the focused element and the focus moves on failure.

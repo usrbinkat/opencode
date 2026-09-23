@@ -4,6 +4,7 @@ import {
   partDelta,
   partUpdated,
   renderedPartID,
+  server as fixtureServer,
   session,
   sessionID,
   setupTimeline,
@@ -319,7 +320,7 @@ for (const device of ["Pixel 7", "iPhone 13"]) {
         test(`detached session gestures do not unpin the selected session (${width}px, ${release})`, async ({
           page,
         }, testInfo) => {
-          const server = testInfo.project.use.baseURL!
+          const server = fixtureServer
           const second = "ses_gesture_destination"
           await page.addInitScript(
             ({ server, first, second }) => {
@@ -363,19 +364,51 @@ for (const device of ["Pixel 7", "iPhone 13"]) {
           await expect
             .poll(() => tail.evaluate((element) => element.getBoundingClientRect().top))
             .toBeGreaterThan(before)
-          if (width < 768) {
-            await page.locator('[data-slot="mobile-tabs-trigger"]').click()
-            await page
-              .locator('[data-slot="mobile-tabs-drawer"]')
-              .locator(`[data-titlebar-tab-link][href$="/session/${second}"]`)
-              .click()
-            await expect(page.locator('[data-slot="mobile-tabs-trigger"]')).toContainText("Second gesture session")
+          // Tab storage and DOM state is the session switch's failure message.
+          const tabState = () =>
+            page.evaluate((second) => {
+              const stored = JSON.parse(localStorage.getItem("opencode.window.browser.dat:tabs") ?? "[]")
+              const tabLinks = [...document.querySelectorAll("[data-titlebar-tab-link]")].map((el) => ({
+                href: el.getAttribute("href"),
+                slot: el.closest("[data-slot]")?.getAttribute("data-slot") ?? "none",
+                visible: el.getBoundingClientRect().height > 0,
+              }))
+              const drawerLinks = [
+                ...document.querySelectorAll('[data-slot="mobile-tabs-drawer"] [data-titlebar-tab-link]'),
+              ].map((el) => el.getAttribute("href"))
+              const trigger = document.querySelector('[data-slot="mobile-tabs-trigger"]')
+              return {
+                storedTabs: stored,
+                tabLinksInDOM: tabLinks,
+                drawerLinksInDOM: drawerLinks,
+                triggerExists: !!trigger,
+                triggerVisible: trigger ? trigger.getBoundingClientRect().height > 0 : false,
+                secondSessionID: second,
+                url: location.href,
+              }
+            }, second)
+          const tabsBefore = await tabState()
+          const switchSession = async () => {
+            if (width < 768) {
+              await page.locator('[data-slot="mobile-tabs-trigger"]').click()
+              await page
+                .locator('[data-slot="mobile-tabs-drawer"]')
+                .locator(`[data-titlebar-tab-link][href$="/session/${second}"]`)
+                .click()
+              await expect(page.locator('[data-slot="mobile-tabs-trigger"]')).toContainText("Second gesture session")
+            }
+            if (width >= 768) {
+              await page.locator(`[data-titlebar-tab-link][href$="/session/${second}"]`).click()
+              await expect(page.getByRole("heading", { name: "Second gesture session", exact: true })).toBeVisible()
+            }
+            await expect(page).toHaveURL(new RegExp(`/session/${second}$`))
           }
-          if (width >= 768) {
-            await page.locator(`[data-titlebar-tab-link][href$="/session/${second}"]`).click()
-            await expect(page.getByRole("heading", { name: "Second gesture session", exact: true })).toBeVisible()
-          }
-          await expect(page).toHaveURL(new RegExp(`/session/${second}$`))
+          await switchSession().catch(async (error: Error) => {
+            const tabsAtFailure = await tabState()
+            throw new Error(
+              `${error.message}\nTabs before switch (${width}px): ${JSON.stringify(tabsBefore)}\nTabs at failure: ${JSON.stringify(tabsAtFailure)}`,
+            )
+          })
           await expect(timeline.locator("[data-timeline-virtual-content]")).toBeVisible()
           await expect(tail).toBeInViewport()
           await expect.poll(() => oldTarget.evaluate((element) => element?.isConnected)).toBe(false)

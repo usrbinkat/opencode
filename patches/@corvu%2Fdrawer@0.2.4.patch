@@ -1,62 +1,65 @@
---- a/dist/index.js	2026-09-18 20:45:46.623459710 -0700
-+++ b/dist/index.js	2026-09-18 21:06:15.003499812 -0700
-@@ -332,12 +332,14 @@
-       dragStartPos = null;
-     },
-     onTransitionEnd: (e) => {
-+      console.log("[corvu-drawer] onTransitionEnd", { property: e.propertyName, targetMatch: e.target === dialogContext().contentRef(), transitionState: drawerContext().transitionState() });
-       if (e.target !== dialogContext().contentRef()) return;
-       batch(() => {
-         if (drawerContext().transitionState() === "closing") {
-           drawerContext().closeDrawer();
-         }
-         if (drawerContext().transitionState() !== "resizing") {
-+          console.log("[corvu-drawer] onTransitionEnd: clearing transitionState");
-           drawerContext().setTransitionState(null);
-         }
-       });
-@@ -470,21 +472,30 @@
-   const [transitionAwareOpen, setTransitionAwareOpen] = createSignal(false);
-   createEffect(() => {
-     const _open = open();
-+    console.log("[corvu-drawer] createEffect fired", { _open, transitionAwareOpen: transitionAwareOpen(), transitionState: transitionState(), translate: translate(), drawerSize: drawerSize(), activeSnapPoint: activeSnapPoint() });
-     untrack(() => {
-       if (transitionAwareOpen() === _open) {
-+        console.log("[corvu-drawer] early return: transitionAwareOpen === _open", { value: _open });
-         return;
+diff --git a/node_modules/.bun/@corvu+drawer@0.2.4+da52f1d607d95169/node_modules/@corvu/drawer/.bun-tag-d941b3d2d689a762 b/.bun-tag-d941b3d2d689a762
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/.bun/@corvu+drawer@0.2.4+da52f1d607d95169/node_modules/@corvu/drawer/.bun-tag-f3cf618a394ab53a b/.bun-tag-f3cf618a394ab53a
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/node_modules/.bun/@corvu+drawer@0.2.4+da52f1d607d95169/node_modules/@corvu/drawer/.bun-tag-fed354228810582f b/.bun-tag-fed354228810582f
+new file mode 100644
+index 0000000000000000000000000000000000000000..e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
+diff --git a/dist/index.js b/dist/index.js
+index c5248382bac4a58b510b48e023e27d14b89c390c..02826965bacb5cd74971c2536386d7ad07e532ca 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -476,7 +476,12 @@ var DrawerRoot = (props) => {
        }
        if (_open) {
-+        console.log("[corvu-drawer] open=true, setTransitionAwareOpen(true)", { drawerSize: drawerSize(), translate: translate(), activeSnapPoint: activeSnapPoint() });
          setTransitionAwareOpen(true);
-         afterPaint(() => {
--          batch(() => {
--            setTransitionState("opening");
-+          if (!open()) { console.log("[corvu-drawer] afterPaint1: open went false, skip"); return; }
-+          console.log("[corvu-drawer] afterPaint1: setTransitionState('opening')", { drawerSize: drawerSize(), translate: translate(), activeSnapPoint: activeSnapPoint(), contentRef: !!dialogContext()?.contentRef() });
-+          setTransitionState("opening");
-+          afterPaint(() => {
-+            if (!open()) { console.log("[corvu-drawer] afterPaint2: open went false, skip"); return; }
-+            console.log("[corvu-drawer] afterPaint2: setActiveSnapPoint", { defaultSnapPoint: localProps.defaultSnapPoint, drawerSize: drawerSize(), translateBefore: translate() });
+-        afterPaint(() => {
++        console.log("[drawer-patch] open=true, scheduling afterPaint", { translate: translate(), drawerSize: drawerSize(), activeSnapPoint: activeSnapPoint(), resolvedOffset: resolvedActiveSnapPoint().offset });
++        var _openRetries = 0;
++        afterPaint(function openingAfterPaint() {
++          if (!open()) return;
++          if (drawerSize() === 0) { _openRetries++; console.log("[drawer-patch] drawerSize=0, retry #" + _openRetries); if (_openRetries > 20) { console.error("[drawer-patch] drawerSize stayed 0 after 20 retries, aborting"); return; } afterPaint(openingAfterPaint); return; }
++          if (_openRetries > 0) console.log("[drawer-patch] drawerSize resolved after " + _openRetries + " retries: " + drawerSize());
+           batch(() => {
+             setTransitionState("opening");
              setActiveSnapPoint(localProps.defaultSnapPoint);
-+            console.log("[corvu-drawer] afterPaint2: after setActiveSnapPoint", { translate: translate(), resolvedOffset: resolvedActiveSnapPoint().offset });
-+            const transitionDuration = parseFloat(drawerStyles().transitionDuration);
-+            console.log("[corvu-drawer] afterPaint2: transitionDuration", transitionDuration);
-+            if (transitionDuration === 0) {
-+              setTransitionState(null);
-+            }
-           });
--          const transitionDuration = parseFloat(drawerStyles().transitionDuration);
--          if (transitionDuration === 0) {
--            setTransitionState(null);
--          }
+@@ -487,11 +492,14 @@ var DrawerRoot = (props) => {
+           }
          });
        } else {
++        console.log("[drawer-patch] open=false, setting closing", { translate: translate(), activeSnapPoint: activeSnapPoint() });
          batch(() => {
-@@ -492,6 +503,7 @@
+           setTransitionState("closing");
+           setActiveSnapPoint(0);
+         });
+         afterPaint(() => {
++          console.log("[drawer-patch] closing afterPaint fired", { openNow: open() });
++          if (open()) { console.log("[drawer-patch] closing afterPaint: open went true, skipping"); return; }
+           const transitionDuration = parseFloat(drawerStyles().transitionDuration);
+           if (transitionDuration === 0) {
+             closeDrawer();
+diff --git a/dist/index.jsx b/dist/index.jsx
+index fa3ca91ca526e9c11a10819a8bda27dcbb884af7..3be9f378a78c978bc76483fb5689b4494f4a6a6b 100644
+--- a/dist/index.jsx
++++ b/dist/index.jsx
+@@ -566,7 +566,9 @@ var DrawerRoot = (props) => {
+       }
+       if (_open) {
+         setTransitionAwareOpen(true);
+-        afterPaint(() => {
++        afterPaint(function openingAfterPaint() {
++          if (!open()) return;
++          if (drawerSize() === 0) { afterPaint(openingAfterPaint); return; }
+           batch2(() => {
+             setTransitionState("opening");
+             setActiveSnapPoint(localProps.defaultSnapPoint);
+@@ -584,6 +586,7 @@ var DrawerRoot = (props) => {
            setActiveSnapPoint(0);
          });
          afterPaint(() => {
 +          if (open()) return;
-           const transitionDuration = parseFloat(drawerStyles().transitionDuration);
-           if (transitionDuration === 0) {
-             closeDrawer();
+           const transitionDuration = parseFloat(
+             drawerStyles().transitionDuration
+           );

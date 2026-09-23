@@ -25,9 +25,65 @@ for (const custom of [false, true]) {
     const summary = page.getByRole("dialog", { name: "Session details", exact: true })
     await expect(page.locator('[data-component="composer-editor"]')).toBeEditable()
     await expect(trigger).toBeEnabled()
+
+    // Instrument: track pointer/hover events on the trigger and tooltip mount timing
+    await page.evaluate(() => {
+      const log: Array<{ ms: number; event: string; target: string; tooltipCount: number }> = []
+      const start = performance.now()
+      const record = (event: string, target: string) => {
+        log.push({
+          ms: Math.round(performance.now() - start),
+          event,
+          target,
+          tooltipCount: document.querySelectorAll('[role="tooltip"]').length,
+        })
+      }
+      const btn = document.querySelector('[aria-label="Session details"]') ?? document.querySelector('button')
+      if (btn) {
+        for (const type of ["pointerenter", "pointerover", "mouseenter", "mouseover", "pointerleave"]) {
+          btn.addEventListener(type, () => record(type, "trigger"))
+        }
+      }
+      const observer = new MutationObserver(() => {
+        const tooltip = document.querySelector('[role="tooltip"]')
+        if (tooltip) {
+          record("tooltip-mounted", tooltip.textContent?.slice(0, 40) ?? "")
+          observer.disconnect()
+        }
+      })
+      observer.observe(document.body, { childList: true, subtree: true })
+      ;(window as any).__tooltipLog = log
+    })
+
+    // Capture the trigger rect and pointer path; with the event log they are the tooltip assertion's failure message.
+    const triggerRect = await trigger.boundingBox()
+    await page.evaluate(() => {
+      const positions: Array<{ x: number; y: number; ms: number }> = []
+      const start = performance.now()
+      const handler = (e: PointerEvent) => {
+        positions.push({ x: e.clientX, y: e.clientY, ms: Math.round(performance.now() - start) })
+      }
+      document.addEventListener("pointermove", handler)
+      ;(window as any).__pointerPositions = positions
+      ;(window as any).__pointerCleanup = () => document.removeEventListener("pointermove", handler)
+    })
+
     await trigger.hover()
+
     const tooltip = page.getByRole("tooltip")
-    await expect(tooltip).toBeVisible()
+    await expect(tooltip)
+      .toBeVisible()
+      .catch(async (error: Error) => {
+        const recorded = await page.evaluate(() => {
+          ;(window as any).__pointerCleanup?.()
+          return {
+            pointerPositions: (window as any).__pointerPositions ?? [],
+            tooltipLog: (window as any).__tooltipLog ?? [],
+          }
+        })
+        throw new Error(`${error.message}\n${JSON.stringify({ triggerRect, ...recorded })}`)
+      })
+    await page.evaluate(() => (window as any).__pointerCleanup?.())
     await expect(tooltip).toContainText("Summary")
     const mac = await page.evaluate(() => /(Mac|iPod|iPhone|iPad)/.test(navigator.platform))
     const shortcut = custom ? "F8" : mac ? "Meta+Shift+Y" : "Control+Shift+Y"
