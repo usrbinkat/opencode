@@ -1,13 +1,10 @@
 export function terminalKeyInput(event: KeyboardEvent) {
-  // macOS: Command+Delete clears the terminal input line.
+  // Command/Meta+Delete clears the terminal input line on every platform.
   if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
     if (event.key.toLowerCase() === "backspace") return "\x15"
   }
-  // Linux/Windows: Control+u clears the terminal input line. Handled explicitly
-  // because headless Chromium intercepts Control+u as a browser shortcut before
-  // DOM dispatch. The explicit handler fires via attachCustomKeyEventHandler
-  // which runs before the browser's default action in headed browsers, and
-  // prevents the keystroke from being swallowed.
+  // Control+U is a browser shortcut; in headed browsers the keydown reaches the terminal's custom key
+  // handler first, and mapping it here sends line-kill to the PTY on every platform.
   if (event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
     if (event.key.toLowerCase() === "u") return "\x15"
   }

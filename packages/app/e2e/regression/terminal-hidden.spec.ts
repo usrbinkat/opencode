@@ -483,9 +483,46 @@ async function expectPanelGapHeld(page: Page) {
   // terminal stack, and waits 200ms before collapsing when they unstack (session/screen.tsx, screen-layout.ts).
   // Samples come from ResizeObserver callbacks; headless CI renderers deliver few per transition, so edge samples
   // pull the ratio to about 0.5. The threshold admits that and still fails when the gap is not held.
-  expect(gaps.filter((gap) => gap >= 7 && gap <= 9).length / gaps.length, JSON.stringify(gaps)).toBeGreaterThan(0.4)
+  const held = gaps.filter((gap) => gap >= 7 && gap <= 9).length / gaps.length
+  // The layout snapshot is read only on failure: it separates a stale motion.gap (style.height) from CSS layout.
+  const layout = held > 0.4 ? undefined : await panelLayout(page)
+  expect(held, JSON.stringify({ gaps, layout })).toBeGreaterThan(0.4)
   expect(Math.min(...gaps)).toBeGreaterThanOrEqual(0)
   expect(Math.max(...gaps)).toBeLessThanOrEqual(9)
+}
+
+function panelLayout(page: Page) {
+  return page.evaluate(() => {
+    const gap = document.querySelector<HTMLElement>('[data-slot="session-side-panel-gap"]')
+    const review = document.querySelector<HTMLElement>("#review-panel")
+    const terminal = document.querySelector<HTMLElement>("#terminal-panel")
+    const sideRegion = document.querySelector<HTMLElement>('[data-slot="session-side-region"]')
+    const terminalRegion = document.querySelector<HTMLElement>('[data-slot="session-side-terminal-region"]')
+    const sidePresence = document.querySelector<HTMLElement>('[data-slot="session-side-panel-presence"]')
+    const sideRegionPresence = document.querySelector<HTMLElement>('[data-slot="session-side-region-presence"]')
+    const sideTerminalPresence = document.querySelector<HTMLElement>('[data-slot="side-terminal-panel-presence"]')
+    const gapStyle = gap ? getComputedStyle(gap) : undefined
+    return {
+      gapRectHeight: gap?.getBoundingClientRect().height,
+      gapStyleHeight: gap?.style.height,
+      gapComputedHeight: gapStyle?.height,
+      gapTransition: gapStyle ? `${gapStyle.transitionProperty} ${gapStyle.transitionDuration}` : undefined,
+      reviewExists: !!review,
+      reviewHidden: review?.getAttribute("aria-hidden"),
+      reviewRectHeight: review?.getBoundingClientRect().height,
+      terminalHidden: terminal?.getAttribute("aria-hidden"),
+      terminalOpened: terminal?.getAttribute("data-opened"),
+      terminalRectHeight: terminal?.getBoundingClientRect().height,
+      sideRegionStyleHeight: sideRegion?.style.height,
+      sideRegionRectHeight: sideRegion?.getBoundingClientRect().height,
+      terminalRegionStyleHeight: terminalRegion?.style.height,
+      terminalRegionRectHeight: terminalRegion?.getBoundingClientRect().height,
+      sidePresenceOpened: sidePresence?.getAttribute("data-opened"),
+      sidePresenceClassList: sidePresence?.className.slice(0, 80),
+      sideRegionPresenceOpened: sideRegionPresence?.getAttribute("data-opened"),
+      sideTerminalPresenceOpened: sideTerminalPresence?.getAttribute("data-opened"),
+    }
+  })
 }
 
 async function expectTerminalTopAnchored(page: Page) {

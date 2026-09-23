@@ -90,12 +90,18 @@ test("clears the terminal line with Command+Delete", async ({ page }) => {
   await expect.poll(() => sendPtyOutput).toBeDefined()
   await expect.poll(() => terminal.evaluate((el) => el.contains(document.activeElement)), { timeout: 10_000 }).toBe(true)
 
-  // App mapping (terminalKeyInput): Command/Meta+Delete kills the line on every platform.
+  // terminalKeyInput maps both line-kill bindings to \x15 on every platform: Command/Meta+Delete, then Ctrl+U.
   await page.keyboard.press("Meta+Backspace")
   await expect.poll(() => ptyInput.join("")).toBe("\x15")
 
-  // Terminal line-kill passthrough: Ctrl+U reaches the PTY unchanged on every platform.
-  await page.keyboard.press("Control+u")
+  // Headless Chromium consumes a pressed Ctrl+U before any DOM keydown, so dispatch it to the textarea.
+  await terminal.evaluate((el) => {
+    const textarea = el.querySelector("textarea")
+    if (!textarea) throw new Error("Terminal textarea not found")
+    textarea.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "u", code: "KeyU", ctrlKey: true, bubbles: true, cancelable: true }),
+    )
+  })
   await expect.poll(() => ptyInput.join("")).toBe("\x15\x15")
 })
 
