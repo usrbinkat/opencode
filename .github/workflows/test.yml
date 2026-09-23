@@ -222,24 +222,30 @@ jobs:
       fail-fast: false
       matrix:
         settings:
-          - name: linux-1/4
+          - name: linux-1of4
             host: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
             shard: 1/4
-          - name: linux-2/4
+          - name: linux-2of4
             host: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
             shard: 2/4
-          - name: linux-3/4
+          - name: linux-3of4
             host: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
             shard: 3/4
-          - name: linux-4/4
+          - name: linux-4of4
             host: ${{ vars.RUNNER_LINUX || 'ubuntu-24.04' }}
             shard: 4/4
-          - name: windows-1/2
+          - name: windows-1of4
             host: ${{ vars.RUNNER_WINDOWS || 'windows-2025' }}
-            shard: 1/2
-          - name: windows-2/2
+            shard: 1/4
+          - name: windows-2of4
             host: ${{ vars.RUNNER_WINDOWS || 'windows-2025' }}
-            shard: 2/2
+            shard: 2/4
+          - name: windows-3of4
+            host: ${{ vars.RUNNER_WINDOWS || 'windows-2025' }}
+            shard: 3/4
+          - name: windows-4of4
+            host: ${{ vars.RUNNER_WINDOWS || 'windows-2025' }}
+            shard: 4/4
     runs-on: ${{ matrix.settings.host }}
     timeout-minutes: 20
     env:
@@ -295,7 +301,7 @@ jobs:
           - name: windows
             host: ${{ vars.RUNNER_WINDOWS || 'windows-2025' }}
     runs-on: ${{ matrix.settings.host }}
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       E2E_ENABLED: ${{ github.ref_name == 'v2' || needs.affected.outputs.app == 'true' }}
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright-browsers
@@ -316,6 +322,11 @@ jobs:
       - name: Setup Playwright
         if: env.E2E_ENABLED == 'true'
         uses: ./.github/actions/setup-playwright
+
+      - name: Build app for service worker tests
+        if: env.E2E_ENABLED == 'true'
+        working-directory: packages/app
+        run: bun run build
 
       - name: Verify service worker precaching and upgrades
         if: env.E2E_ENABLED == 'true'

@@ -43,6 +43,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
   ]
   ++ lib.optionals stdenvNoCC.hostPlatform.isDarwin [
     darwin.autoSignDarwinBinariesHook
+    darwin.sigtool
   ];
 
   buildInputs = lib.optionals stdenvNoCC.hostPlatform.isLinux [
