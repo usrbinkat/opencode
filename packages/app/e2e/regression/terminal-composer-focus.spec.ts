@@ -94,7 +94,8 @@ test("clears the terminal line with Command+Delete", async ({ page }) => {
   await page.keyboard.press("Meta+Backspace")
   await expect.poll(() => ptyInput.join("")).toBe("\x15")
 
-  // Headless Chromium consumes a pressed Ctrl+U before any DOM keydown, so dispatch it to the textarea.
+  // Headless Chromium consumes a pressed Ctrl+U before any DOM keydown, so dispatch it to the textarea. The keydown
+  // takes the production path: attachCustomKeyEventHandler -> terminalKeyInput -> t.input("\x15", true).
   await terminal.evaluate((el) => {
     const textarea = el.querySelector("textarea")
     if (!textarea) throw new Error("Terminal textarea not found")

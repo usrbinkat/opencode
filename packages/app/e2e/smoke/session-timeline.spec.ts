@@ -548,6 +548,7 @@ async function expectCanScrollToStart(
   const samples: TraversalSample[] = []
   let current = await timelineState(page)
   let unchangedAtTop = 0
+  let exit = "hit the 800 attempt limit"
 
   for (let attempt = 0; attempt < 800; attempt++) {
     collectSeen(current, seenParts, seenMessages)
@@ -563,7 +564,7 @@ async function expectCanScrollToStart(
       seenParts.size === expectedPartIDs.length &&
       seenMessages.size === expectedMessageIDs.length
     ) {
-      expectCompleteScroll(current, expectedPartIDs, expectedMessageIDs, seenParts, seenMessages, samples)
+      expectCompleteScroll(current, expectedPartIDs, expectedMessageIDs, seenParts, seenMessages, samples, `reached start at attempt ${attempt}`)
       return
     }
 
@@ -572,12 +573,15 @@ async function expectCanScrollToStart(
     current = await timelineState(page)
     if (!changed && current.signature === before.signature && current.scrollTop <= 1) unchangedAtTop++
     else unchangedAtTop = 0
-    if (unchangedAtTop >= 2) break
+    if (unchangedAtTop >= 2) {
+      exit = `unchanged at top from attempt ${attempt}`
+      break
+    }
   }
 
   collectSeen(current, seenParts, seenMessages)
   samples.push(sampleTraversal(current, seenParts.size, seenMessages.size))
-  expectCompleteScroll(current, expectedPartIDs, expectedMessageIDs, seenParts, seenMessages, samples)
+  expectCompleteScroll(current, expectedPartIDs, expectedMessageIDs, seenParts, seenMessages, samples, exit)
 }
 
 async function timelineState(page: Page) {
@@ -744,15 +748,16 @@ function expectCompleteScroll(
   seenParts: Set<string>,
   seenMessages: Set<string>,
   samples: TraversalSample[],
+  exit: string,
 ) {
-  expect(state.scrollTop, `timeline should reach the start\n${sampleSummary(samples)}`).toBeLessThanOrEqual(1)
+  expect(state.scrollTop, `timeline should reach the start (${exit})\n${sampleSummary(samples)}`).toBeLessThanOrEqual(1)
   expect(
     expectedPartIDs.filter((id) => !seenParts.has(id)),
-    `missing visible timeline parts\n${sampleSummary(samples)}`,
+    `missing visible timeline parts (${exit})\n${sampleSummary(samples)}`,
   ).toEqual([])
   expect(
     expectedMessageIDs.filter((id) => !seenMessages.has(id)),
-    `missing visible messages\n${sampleSummary(samples)}`,
+    `missing visible messages (${exit})\n${sampleSummary(samples)}`,
   ).toEqual([])
   expect(new Set(expectedPartIDs).size).toBe(expectedPartIDs.length)
   expect(new Set(expectedMessageIDs).size).toBe(expectedMessageIDs.length)

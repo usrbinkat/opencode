@@ -125,7 +125,7 @@ test("animates review and terminal panels while caching hidden terminal content"
   await expectHeightMotions(page, "session-side-region", 1)
   await expectHeightMotions(page, "session-side-terminal-region", 1)
   await expectStackedGeometry(page)
-  await expectPanelGapHeld(page)
+  await expectPanelGapHeld(page, "terminal opened, review and terminal stack")
 
   await resetTerminalBottomMotion(page)
   await resetTerminalAnchorGaps(page)
@@ -140,7 +140,7 @@ test("animates review and terminal panels while caching hidden terminal content"
   await expectHeightMotions(page, "session-side-terminal-region", 2)
   await expectTerminalBottomFixed(page)
   await expectTerminalTopAnchored(page)
-  await expectPanelGapHeld(page)
+  await expectPanelGapHeld(page, "review closed, terminal visible (unstacking)")
   await reviewToggle.click()
   await expect(page.locator("#review-panel")).toBeVisible()
   await expect(reviewContent).toHaveAttribute("data-cache-probe", "original")
@@ -157,7 +157,7 @@ test("animates review and terminal panels while caching hidden terminal content"
   await expect(terminalContent).toHaveAttribute("data-cache-probe", "original")
   await expectTerminalContentCachedSize(page)
   await expectStackPainted(page)
-  await expectPanelGapHeld(page)
+  await expectPanelGapHeld(page, "terminal closed, review visible (unstacking)")
   await expect(page.locator('[data-slot="session-side-panel-gap"]')).toHaveCSS("height", "0px")
 
   await reviewToggle.click()
@@ -474,11 +474,11 @@ async function resetPanelGaps(page: Page) {
   })
 }
 
-async function expectPanelGapHeld(page: Page) {
+async function expectPanelGapHeld(page: Page, caller: string) {
   const gaps = await page.evaluate(
     () => (window as Window & { __panelMotion?: MotionProbe }).__panelMotion?.panelGaps ?? [],
   )
-  expect(gaps.length).toBeGreaterThan(0)
+  expect(gaps.length, caller).toBeGreaterThan(0)
   // The 8px gap holds through most of the 240ms region transition: it grows during the first 40ms when review and
   // terminal stack, and waits 200ms before collapsing when they unstack (session/screen.tsx, screen-layout.ts).
   // Samples come from ResizeObserver callbacks; headless CI renderers deliver few per transition, so edge samples
@@ -486,9 +486,9 @@ async function expectPanelGapHeld(page: Page) {
   const held = gaps.filter((gap) => gap >= 7 && gap <= 9).length / gaps.length
   // The layout snapshot is read only on failure: it separates a stale motion.gap (style.height) from CSS layout.
   const layout = held > 0.4 ? undefined : await panelLayout(page)
-  expect(held, JSON.stringify({ gaps, layout })).toBeGreaterThan(0.4)
-  expect(Math.min(...gaps)).toBeGreaterThanOrEqual(0)
-  expect(Math.max(...gaps)).toBeLessThanOrEqual(9)
+  expect(held, JSON.stringify({ caller, gaps, layout })).toBeGreaterThan(0.4)
+  expect(Math.min(...gaps), JSON.stringify({ caller, gaps })).toBeGreaterThanOrEqual(0)
+  expect(Math.max(...gaps), JSON.stringify({ caller, gaps })).toBeLessThanOrEqual(9)
 }
 
 function panelLayout(page: Page) {
