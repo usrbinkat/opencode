@@ -141,6 +141,8 @@ test("animates review and terminal panels while caching hidden terminal content"
   await expectTerminalBottomFixed(page)
   await expectTerminalTopAnchored(page)
   await expectPanelGapHeld(page, "review closed, terminal visible (unstacking)")
+  // Once unstacked, only the terminal fills the side panel and the gap settles at 0px (screen-layout.ts).
+  await expect(page.locator('[data-slot="session-side-panel-gap"]')).toHaveCSS("height", "0px")
   await reviewToggle.click()
   await expect(page.locator("#review-panel")).toBeVisible()
   await expect(reviewContent).toHaveAttribute("data-cache-probe", "original")

@@ -6,6 +6,7 @@ import { Tooltip } from "@opencode/ui/tooltip"
 import { Icon } from "@opencode/ui/icon"
 import { getFilename } from "@opencode/util/path"
 import { useLanguage } from "@/runtime/i18n/language"
+import { createMenuDismissController } from "@/shell/commands/menu-dismiss"
 import { sameDirectory } from "@/workspaces/paths"
 
 export function PromptWorkspaceSelector(props: {
@@ -30,6 +31,10 @@ export function PromptWorkspaceSelector(props: {
   const [search, setSearch] = createStore({ workspaces: "", branches: "" })
   let searchInput: HTMLInputElement | undefined
   let branchSearchInput: HTMLInputElement | undefined
+  let workspaceContentRef: HTMLDivElement | undefined
+  let branchContentRef: HTMLDivElement | undefined
+  const workspaceDismiss = createMenuDismissController(() => workspaceContentRef)
+  const branchDismiss = createMenuDismissController(() => branchContentRef)
   let focusSearch = false
   const branchTruncation = createTruncatedText()
   const focusWorktreeSearch = () =>
@@ -49,11 +54,9 @@ export function PromptWorkspaceSelector(props: {
   const select = (value: string) => {
     pending = { type: "select", value }
   }
-  // True when the menu closed on a choice, so focus returns to the caller's surface instead of the trigger.
-  let resume = false
-  const onOpenChange = (open: boolean) => {
+  const onOpenChange = (dismiss: ReturnType<typeof createMenuDismissController>) => (open: boolean) => {
     if (open) {
-      resume = false
+      dismiss.allowTriggerRestore()
       setSearch({ workspaces: "", branches: "" })
       props.onSearch("")
       return
@@ -63,14 +66,11 @@ export function PromptWorkspaceSelector(props: {
     if (action?.type === "select") props.onChange(action.value)
     if (action?.type === "create") props.onCreate(action.branch)
     if (action?.type === "viewAll") props.onViewAll()
-    resume = action?.type === "select" || action?.type === "create"
-  }
-  // Kobalte calls this from the content's unmount task, then focuses the trigger itself. A dismissal
-  // therefore leaves focus on the trigger; after a choice, onDone schedules its focus behind that write.
-  const onCloseAutoFocus = () => {
-    if (!resume) return
-    resume = false
-    props.onDone?.()
+    if (action?.type !== "select" && action?.type !== "create") return
+    // A choice hands focus to the caller's surface once the menu content has unmounted; a dismissal keeps
+    // the trigger restore.
+    dismiss.preventTriggerRestore()
+    dismiss.afterClose(() => props.onDone?.())
   }
   const label = () => {
     if (selected() === "main")
@@ -109,7 +109,7 @@ export function PromptWorkspaceSelector(props: {
           gutter={4}
           overflowPadding={24}
           modal={summary() ? false : undefined}
-          onOpenChange={onOpenChange}
+          onOpenChange={onOpenChange(workspaceDismiss)}
         >
           <Menu.Trigger
             aria-description={language.t("session.new.workspace.trigger.tooltip")}
@@ -138,7 +138,11 @@ export function PromptWorkspaceSelector(props: {
             />
           </Menu.Trigger>
           <Menu.Portal>
-            <Menu.Content class="w-[200px]" onCloseAutoFocus={onCloseAutoFocus}>
+            <Menu.Content
+              ref={(element: HTMLDivElement) => (workspaceContentRef = element)}
+              class="w-[200px]"
+              onCloseAutoFocus={workspaceDismiss.onCloseAutoFocus}
+            >
               <Menu.Group>
                 <Menu.GroupLabel>{language.t("session.new.workspace.runIn")}</Menu.GroupLabel>
                 <Menu.Item onSelect={() => select("main")}>
@@ -284,7 +288,12 @@ export function PromptWorkspaceSelector(props: {
           class={summary() ? "min-w-0 w-full" : "ms-1 min-w-0 max-w-[220px]"}
           contentClass="max-w-[calc(100vw-32px)] break-all"
         >
-          <Menu placement={placement()} gutter={4} modal={summary() ? false : undefined} onOpenChange={onOpenChange}>
+          <Menu
+            placement={placement()}
+            gutter={4}
+            modal={summary() ? false : undefined}
+            onOpenChange={onOpenChange(branchDismiss)}
+          >
             <Menu.Trigger
               class={
                 summary()
@@ -306,13 +315,14 @@ export function PromptWorkspaceSelector(props: {
             </Menu.Trigger>
             <Menu.Portal>
               <Menu.Content
+                ref={(element: HTMLDivElement) => (branchContentRef = element)}
                 class="w-[243px] overflow-hidden rounded-md border-0 bg-v2-background-bg-layer-01 shadow-[var(--v2-elevation-floating)] focus:outline-none"
                 onOpenAutoFocus={(event) => {
                   event.preventDefault()
                   // Kobalte defers its list autofocus until after the focus scope opens.
                   setTimeout(() => requestAnimationFrame(() => branchSearchInput?.focus({ preventScroll: true })))
                 }}
-                onCloseAutoFocus={onCloseAutoFocus}
+                onCloseAutoFocus={branchDismiss.onCloseAutoFocus}
               >
                 <div class="flex h-7 shrink-0 items-center gap-2 rounded-sm pl-3 pr-2.5 text-v2-icon-icon-muted">
                   <Icon name="magnifying-glass" size="small" class="shrink-0" />

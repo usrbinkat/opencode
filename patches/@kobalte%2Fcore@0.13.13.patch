@@ -1,0 +1,40 @@
+diff --git a/dist/chunk/3565MS4H.jsx b/dist/chunk/3565MS4H.jsx
+index 0ee681e296a6e52bdac5d955eb1b1058d30e9983..c7cf85eedebe7c239e4ffcc6fba741b949f27504 100644
+--- a/dist/chunk/3565MS4H.jsx
++++ b/dist/chunk/3565MS4H.jsx
+@@ -67,7 +67,7 @@ function DropdownMenuContent(props) {
+   let hasInteractedOutside = false;
+   const onCloseAutoFocus = (e) => {
+     local.onCloseAutoFocus?.(e);
+-    if (!hasInteractedOutside) {
++    if (!hasInteractedOutside && !e.defaultPrevented) {
+       focusWithoutScrolling(context.triggerRef());
+     }
+     hasInteractedOutside = false;
+diff --git a/dist/chunk/JEP7F7FN.js b/dist/chunk/JEP7F7FN.js
+index a5906978688e5b06e493f93d551a6dd882d5eb51..8722d258f0b3631b53e81a408e24cc846b0ebf18 100644
+--- a/dist/chunk/JEP7F7FN.js
++++ b/dist/chunk/JEP7F7FN.js
+@@ -37,7 +37,7 @@ function DropdownMenuContent(props) {
+   let hasInteractedOutside = false;
+   const onCloseAutoFocus = (e) => {
+     local.onCloseAutoFocus?.(e);
+-    if (!hasInteractedOutside) {
++    if (!hasInteractedOutside && !e.defaultPrevented) {
+       focusWithoutScrolling(context.triggerRef());
+     }
+     hasInteractedOutside = false;
+diff --git a/src/dropdown-menu/dropdown-menu-content.tsx b/src/dropdown-menu/dropdown-menu-content.tsx
+index 02672fa3904984be01c5c5f3b0f172812e38f84e..c4df52ca3bd5db9817700a11ac928c2ac29884d5 100644
+--- a/src/dropdown-menu/dropdown-menu-content.tsx
++++ b/src/dropdown-menu/dropdown-menu-content.tsx
+@@ -46,7 +46,8 @@ export function DropdownMenuContent<T extends ValidComponent = "div">(
+ 	const onCloseAutoFocus = (e: Event) => {
+ 		local.onCloseAutoFocus?.(e);
+ 
+-		if (!hasInteractedOutside) {
++		// Honor a caller's preventDefault, as ContextMenuContent does and the onCloseAutoFocus contract documents.
++		if (!hasInteractedOutside && !e.defaultPrevented) {
+ 			focusWithoutScrolling(context.triggerRef());
+ 		}
+ 

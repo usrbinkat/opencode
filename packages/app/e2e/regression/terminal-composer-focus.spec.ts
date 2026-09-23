@@ -96,14 +96,21 @@ test("clears the terminal line with Command+Delete", async ({ page }) => {
 
   // Headless Chromium consumes a pressed Ctrl+U before any DOM keydown, so dispatch it to the textarea. The keydown
   // takes the production path: attachCustomKeyEventHandler -> terminalKeyInput -> t.input("\x15", true).
-  await terminal.evaluate((el) => {
+  const dispatch = await terminal.evaluate((el) => {
     const textarea = el.querySelector("textarea")
     if (!textarea) throw new Error("Terminal textarea not found")
-    textarea.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "u", code: "KeyU", ctrlKey: true, bubbles: true, cancelable: true }),
-    )
+    const seen: string[] = []
+    const record = (event: Event) => seen.push(event.currentTarget === textarea ? "textarea" : "container")
+    el.addEventListener("keydown", record, true)
+    textarea.addEventListener("keydown", record, true)
+    const event = new KeyboardEvent("keydown", { key: "u", code: "KeyU", ctrlKey: true, bubbles: true, cancelable: true })
+    textarea.dispatchEvent(event)
+    el.removeEventListener("keydown", record, true)
+    textarea.removeEventListener("keydown", record, true)
+    return { seen, defaultPrevented: event.defaultPrevented, connected: textarea.isConnected }
   })
-  await expect.poll(() => ptyInput.join("")).toBe("\x15\x15")
+  // The dispatch record is reported only on failure: which listeners saw the keydown and whether the textarea was live.
+  await expect.poll(() => ptyInput.join(""), { message: JSON.stringify(dispatch) }).toBe("\x15\x15")
 })
 
 test("hides the native contenteditable caret", async ({ page }) => {
@@ -152,7 +159,19 @@ test("routes typing to the composer unless the open terminal is focused", async 
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
   await page.keyboard.type("a")
 
-  await expect.poll(() => composer.evaluate((el) => document.activeElement === el), { timeout: 10_000 }).toBe(true)
+  // Identity poll names the focused element on failure.
+  await expect
+    .poll(
+      () =>
+        composer.evaluate((editor) => {
+          const element = document.activeElement
+          if (element === editor) return "composer"
+          if (!element) return "none"
+          return `${element.tagName.toLowerCase()} role=${element.getAttribute("role")} text=${element.textContent?.slice(0, 40)}`
+        }),
+      { timeout: 10_000 },
+    )
+    .toBe("composer")
   await expect(composer).toHaveText("a")
 })
 
