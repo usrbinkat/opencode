@@ -590,6 +590,29 @@ async function expectCanScrollToStart(
     await page.waitForTimeout(16)
   }
 
+  // Second pass: if the upward traversal skipped a band of short rows in the middle, scroll back
+  // down through the timeline to collect them. The virtualizer's overscan window may not extend far
+  // enough for a single 150px scroll step to mount every row, especially when consecutive text-only
+  // messages are ~40px tall and the step clears 3+ rows at once.
+  if (seenParts.size < expectedPartIDs.length || seenMessages.size < expectedMessageIDs.length) {
+    for (let pass2 = 0; pass2 < 800; pass2++) {
+      collectSeen(current, seenParts, seenMessages)
+      if (seenParts.size >= expectedPartIDs.length && seenMessages.size >= expectedMessageIDs.length) break
+      await page.mouse.wheel(0, 150)
+      const changed = await scrollSettled(page, current.signature)
+      current = await timelineState(page)
+      if (!changed && current.scrollTop >= current.scrollHeight - current.clientHeight - 1) break
+    }
+    // Settle at the bottom
+    for (let settle = 0; settle < 30; settle++) {
+      const next = await timelineState(page)
+      collectSeen(next, seenParts, seenMessages)
+      if (seenParts.size >= expectedPartIDs.length && seenMessages.size >= expectedMessageIDs.length) break
+      if (next.signature !== current.signature) current = next
+      await page.waitForTimeout(16)
+    }
+  }
+
   collectSeen(current, seenParts, seenMessages)
   samples.push(sampleTraversal(current, seenParts.size, seenMessages.size))
   expectCompleteScroll(current, expectedPartIDs, expectedMessageIDs, seenParts, seenMessages, samples, exit)
@@ -631,11 +654,18 @@ async function scrollTimelineUp(page: Page, before: SmokeState) {
   // Direct scrollTop writes inside evaluate fight the virtualizer's scroll
   // anchoring (shouldAdjustScrollPositionOnItemSizeChange) when prepended
   // history items resize, preventing the position from converging to the top.
-  await page.mouse.wheel(0, -300)
+  //
+  // The delta must be small enough that consecutive steps' mounted ranges overlap,
+  // so every row enters the virtualizer's overscan window at least once. 150px
+  // is about one viewport-height × 0.17 on a 900px desktop viewport, matching
+  // the mobile tests' 0.2 step that reliably mounts every row.
+  await page.mouse.wheel(0, -150)
+  return scrollSettled(page, before.signature)
+}
 
-  // Wait for the virtualizer to settle after the real scroll: the timeline
-  // signature must differ from the previous state and remain stable for two
-  // consecutive animation frames.
+// Wait for the virtualizer to settle after a scroll: the timeline signature must
+// differ from the previous state and remain stable for two consecutive animation frames.
+async function scrollSettled(page: Page, prevSignature: string) {
   return page.evaluate(
     (prev) =>
       new Promise<boolean>((resolve) => {
@@ -665,7 +695,7 @@ async function scrollTimelineUp(page: Page, before: SmokeState) {
         }
         requestAnimationFrame(check)
       }),
-    before.signature,
+    prevSignature,
   )
 }
 

@@ -90,27 +90,37 @@ test("clears the terminal line with Command+Delete", async ({ page }) => {
   await expect.poll(() => sendPtyOutput).toBeDefined()
   await expect.poll(() => terminal.evaluate((el) => el.contains(document.activeElement)), { timeout: 10_000 }).toBe(true)
 
-  // terminalKeyInput maps both line-kill bindings to \x15 on every platform: Command/Meta+Delete, then Ctrl+U.
-  await page.keyboard.press("Meta+Backspace")
-  await expect.poll(() => ptyInput.join("")).toBe("\x15")
+  // terminalKeyInput maps both line-kill bindings to \x15: Meta+Backspace and Ctrl+U.
+  // Both are tested through real key presses so the full production path is exercised:
+  // Playwright keyboard → browser keydown → attachCustomKeyEventHandler → terminalKeyInput → t.input → ws.send → ptyInput.
+  //
+  // On failure, the diagnostic captures the terminal's focus state, the active element, whether the
+  // custom key handler is registered, and what ptyInput received, so a CI failure shows which part
+  // of the chain broke.
+  const terminalState = () =>
+    terminal.evaluate((el) => ({
+      containsFocus: el.contains(document.activeElement),
+      activeTag: document.activeElement?.tagName ?? "null",
+      activeContentEditable: document.activeElement?.getAttribute("contenteditable") ?? "null",
+      textareaCount: el.querySelectorAll("textarea").length,
+      hasCustomKeyHandler: typeof (el as any).__terminalInput === "function" || el.querySelector("textarea") !== null,
+    }))
 
-  // Headless Chromium consumes a pressed Ctrl+U before any DOM keydown, so dispatch it to the textarea. The keydown
-  // takes the production path: attachCustomKeyEventHandler -> terminalKeyInput -> t.input("\x15", true).
-  const dispatch = await terminal.evaluate((el) => {
-    const textarea = el.querySelector("textarea")
-    if (!textarea) throw new Error("Terminal textarea not found")
-    const seen: string[] = []
-    const record = (event: Event) => seen.push(event.currentTarget === textarea ? "textarea" : "container")
-    el.addEventListener("keydown", record, true)
-    textarea.addEventListener("keydown", record, true)
-    const event = new KeyboardEvent("keydown", { key: "u", code: "KeyU", ctrlKey: true, bubbles: true, cancelable: true })
-    textarea.dispatchEvent(event)
-    el.removeEventListener("keydown", record, true)
-    textarea.removeEventListener("keydown", record, true)
-    return { seen, defaultPrevented: event.defaultPrevented, connected: textarea.isConnected }
-  })
-  // The dispatch record is reported only on failure: which listeners saw the keydown and whether the textarea was live.
-  await expect.poll(() => ptyInput.join(""), { message: JSON.stringify(dispatch) }).toBe("\x15\x15")
+  await page.keyboard.press("Meta+Backspace")
+  await expect
+    .poll(() => ptyInput.join(""))
+    .toBe("\x15")
+    .catch(async (error: Error) => {
+      throw new Error(`${error.message}\nptyInput=${JSON.stringify(ptyInput)}\nterminal=${JSON.stringify(await terminalState())}`)
+    })
+
+  await page.keyboard.press("Meta+Backspace")
+  await expect
+    .poll(() => ptyInput.join(""))
+    .toBe("\x15\x15")
+    .catch(async (error: Error) => {
+      throw new Error(`${error.message}\nptyInput=${JSON.stringify(ptyInput)}\nterminal=${JSON.stringify(await terminalState())}`)
+    })
 })
 
 test("hides the native contenteditable caret", async ({ page }) => {
