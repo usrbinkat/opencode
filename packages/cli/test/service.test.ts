@@ -629,10 +629,21 @@ async function startManagedService(prefix: string, failBoot = false) {
     stdout: "ignore",
   })
   const info = await waitForInfo(registration).catch(async (cause) => {
+    const exitCode = owner.exitCode
+    const stderr = await new Response(owner.stderr).text().catch(() => "(unreadable)")
+    const fileExists = await Bun.file(registration).exists()
+    const fileContent = fileExists ? await Bun.file(registration).text().catch(() => "(unreadable)") : "(missing)"
+    const dirExists = await fs.stat(path.dirname(registration)).then(() => true, () => false)
     owner.kill("SIGTERM")
     await owner.exited
     await fs.rm(root, { recursive: true, force: true })
-    throw cause
+    throw new Error(
+      `${cause instanceof Error ? cause.message : cause}\n` +
+      `owner: exitCode=${exitCode} running=${exitCode === null}\n` +
+      `registration dir exists=${dirExists} file exists=${fileExists}\n` +
+      `file content: ${fileContent.slice(0, 500)}\n` +
+      `stderr (last 1000 chars): ${stderr.slice(-1000)}`,
+    )
   })
   return { root, port, registration, owner, info }
 }
