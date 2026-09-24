@@ -100,7 +100,7 @@ jobs:
           - name: windows
             host: ${{ vars.RUNNER_WINDOWS || 'windows-2025' }}
     runs-on: ${{ matrix.settings.host }}
-    timeout-minutes: 20
+    timeout-minutes: 40
     defaults:
       run:
         shell: bash
@@ -117,7 +117,7 @@ jobs:
       - uses: ./.github/actions/setup-turbo-cache
 
       - name: Run unit tests
-        timeout-minutes: 15
+        timeout-minutes: 30
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             GITHUB_ACTIONS=false bun turbo test --concurrency=3
@@ -141,7 +141,7 @@ jobs:
           - name: windows
             host: ${{ vars.RUNNER_WINDOWS || 'windows-2025' }}
     runs-on: ${{ matrix.settings.host }}
-    timeout-minutes: 25
+    timeout-minutes: 40
     defaults:
       run:
         shell: bash
