@@ -227,7 +227,16 @@ async function smoke(output: string) {
   if (process.platform !== "win32") await chmod(executable, 0o755)
   run(executable, ["--version"], root)
   run(executable, ["--help"], root)
-  await rm(root, { recursive: true, force: true })
+  // Windows holds file handles briefly after spawnSync returns; retry rm on EBUSY.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await rm(root, { recursive: true, force: true })
+      break
+    } catch (error: unknown) {
+      if (attempt >= 5 || !(error instanceof Error) || !("code" in error) || error.code !== "EBUSY") throw error
+      await new Promise((resolve) => setTimeout(resolve, 200 * (attempt + 1)))
+    }
+  }
 }
 
 function targetName(target: NodeTarget) {
