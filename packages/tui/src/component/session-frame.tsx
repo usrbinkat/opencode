@@ -46,8 +46,11 @@ export function SessionFrame(props: { sessionID: string; verticalTabsWidth: numb
     value: () => layout.paneWidth ?? layout.terminalWidth ?? defaultPaneWidth(),
     defaultValue: defaultPaneWidth,
     clamp: (width) => clampSessionPaneWidth(width, panels.width()),
-    fromMouse: (event) => dimensions().width - event.x - 1,
-    contains: (event, width) => event.x >= dimensions().width - width - 1 && event.x <= dimensions().width - width,
+    fromMouse: (event) => (terminalLeft() ? event.x - props.verticalTabsWidth + 1 : dimensions().width - event.x - 1),
+    contains: (event, width) => {
+      const boundary = terminalLeft() ? props.verticalTabsWidth + width - 1 : dimensions().width - width - 1
+      return event.x >= boundary && event.x <= boundary + 1
+    },
     onCommit: (width) => {
       void updateLayout((draft) => {
         draft.paneWidth = width
@@ -68,6 +71,17 @@ export function SessionFrame(props: { sessionID: string; verticalTabsWidth: numb
   const [sidebarOpen, setSidebarOpen] = createSignal(false)
   const [sessionWidth, setSessionWidth] = createSignal<number>()
   const [activePane, setActivePane] = createSignal<"session" | "right">("session")
+  // The right slot can be replaced while unfocused, so a remembered right pane is valid only for the same occupant.
+  const rightIdentity = () => {
+    const panel = activePanel()
+    return panel ? `panel:${panel.plugin}:${panel.name}` : selectedTerminal()?.id
+  }
+  let previousPane: { pane: "session" | "right"; right: string | undefined } | undefined
+  const activatePane = (pane: "session" | "right") => {
+    if (pane === activePane()) return
+    previousPane = { pane: activePane(), right: rightIdentity() }
+    setActivePane(pane)
+  }
   const [restoreTerminalFocus, setRestoreTerminalFocus] = createSignal(false)
   let focusTerminal: (() => void) | undefined
   let showTerminals: (() => void) | undefined
@@ -115,6 +129,7 @@ export function SessionFrame(props: { sessionID: string; verticalTabsWidth: numb
     if (selectedTerminal()) return "terminal"
     if (sidebarVisible()) return "sidebar"
   })
+  const terminalLeft = () => rightPane() === "terminal" && config.data.experimental?.["terminal-left"] === true
   const toggleSidebar = () => {
     batch(() => {
       const visible = rightPane() === "sidebar"
@@ -132,11 +147,11 @@ export function SessionFrame(props: { sessionID: string; verticalTabsWidth: numb
     if (fullscreen()) return
     // Permission prompts replace the input, so returning focus must not depend on it.
     if (activePane() === "right") renderer.currentFocusedRenderable?.blur()
-    setActivePane("session")
+    activatePane("session")
     prompt.current?.focus()
   }
   const focusRightPane = () => {
-    setActivePane("right")
+    activatePane("right")
     if (activePanel()) {
       panelNode?.focus()
       return
@@ -145,8 +160,8 @@ export function SessionFrame(props: { sessionID: string; verticalTabsWidth: numb
   }
   const onFocused = () => {
     const current = renderer.currentFocusedRenderable
-    if (rightPane() !== "sidebar" && within(current, rightNode)) setActivePane("right")
-    if (!fullscreen() && within(current, sessionNode)) setActivePane("session")
+    if (rightPane() !== "sidebar" && within(current, rightNode)) activatePane("right")
+    if (!fullscreen() && within(current, sessionNode)) activatePane("session")
   }
   renderer.on(CliRenderEvents.FOCUSED_RENDERABLE, onFocused)
   onCleanup(() => renderer.off(CliRenderEvents.FOCUSED_RENDERABLE, onFocused))
@@ -161,21 +176,91 @@ export function SessionFrame(props: { sessionID: string; verticalTabsWidth: numb
     setRestoreTerminalFocus(false)
     focusSession()
   })
+  const navigate = (direction: "left" | "right" | "up" | "down" | "previous") => {
+    if (config.data.experimental?.["vim-pane-navigation"] !== true) return false
+    if (dialog.stack.length || fullscreen()) return false
+    if (rightPane() !== "terminal" && rightPane() !== "panel") return false
+    if (direction === "previous") {
+      if (!previousPane || previousPane.pane === activePane()) return false
+      if (previousPane.pane === "right" && previousPane.right !== rightIdentity()) return false
+      if (previousPane.pane === "session") focusSession()
+      else focusRightPane()
+      return
+    }
+    const origin = activePane() === "session" ? sessionNode : rightNode
+    const target = activePane() === "session" ? rightNode : sessionNode
+    if (!origin || !target || origin.isDestroyed || target.isDestroyed) return false
+    const horizontalOverlap = origin.x < target.x + target.width && target.x < origin.x + origin.width
+    const verticalOverlap = origin.y < target.y + target.height && target.y < origin.y + origin.height
+    const adjacent = {
+      left: verticalOverlap && target.x + target.width <= origin.x,
+      right: verticalOverlap && origin.x + origin.width <= target.x,
+      up: horizontalOverlap && target.y + target.height <= origin.y,
+      down: horizontalOverlap && origin.y + origin.height <= target.y,
+    }
+    if (!adjacent[direction]) return false
+    if (activePane() === "session") focusRightPane()
+    else focusSession()
+  }
   Keymap.createLayer(() => ({
     mode: "global",
     enabled: () => (rightPane() === "terminal" || activePanel() !== undefined) && dialog.stack.length === 0,
     commands: [
       {
         id: "pane.focus.left",
-        title: "Focus session pane",
+        title: terminalLeft() ? "Focus terminal pane" : "Focus session pane",
         enabled: () => !fullscreen(),
-        run: focusSession,
+        run: () => (terminalLeft() ? focusRightPane() : focusSession()),
       },
       {
         id: "pane.focus.right",
-        title: "Focus right pane",
-        run: focusRightPane,
+        title: terminalLeft() ? "Focus session pane" : "Focus right pane",
+        run: () => (terminalLeft() ? focusSession() : focusRightPane()),
       },
+    ],
+  }))
+  Keymap.createLayer(() => ({
+    mode: "global",
+    enabled: () =>
+      config.data.experimental?.["vim-pane-navigation"] === true &&
+      (rightPane() === "terminal" || rightPane() === "panel") &&
+      dialog.stack.length === 0 &&
+      !fullscreen(),
+    commands: [
+      { id: "pane.navigate.left", title: "Navigate left", run: () => navigate("left") },
+      { id: "pane.navigate.right", title: "Navigate right", run: () => navigate("right") },
+      {
+        id: "pane.navigate.up",
+        title: "Focus pane above",
+        run: () => navigate("up"),
+      },
+      {
+        id: "pane.navigate.down",
+        title: "Focus pane below",
+        run: () => navigate("down"),
+      },
+      {
+        id: "pane.navigate.previous",
+        title: "Focus previous pane",
+        run: () => navigate("previous"),
+      },
+    ],
+  }))
+
+  // Horizontal pane shortcuts apply only in the focused chat scope.
+  Keymap.createLayer(() => ({
+    priority: 100,
+    enabled: () =>
+      config.data.experimental?.["vim-pane-navigation"] === true &&
+      (rightPane() === "terminal" || rightPane() === "panel") &&
+      activePane() === "session" &&
+      within(renderer.currentFocusedRenderable, sessionNode) &&
+      dialog.stack.length === 0 &&
+      !fullscreen(),
+    commands: [
+      { bind: "ctrl+h", title: "Focus pane to the left", run: () => navigate("left") },
+      { bind: "ctrl+l", title: "Focus pane to the right", run: () => navigate("right") },
+      { bind: "ctrl+\\", title: "Focus previous pane", run: () => navigate("previous") },
     ],
   }))
 
@@ -263,7 +348,7 @@ export function SessionFrame(props: { sessionID: string; verticalTabsWidth: numb
       flexGrow={1}
       minWidth={0}
       minHeight={0}
-      flexDirection="row"
+      flexDirection={terminalLeft() ? "row-reverse" : "row"}
       position="relative"
       onMouseDrag={paneResize.onMouseDrag}
       onMouseDragEnd={finishPaneResize}
@@ -380,7 +465,11 @@ export function SessionFrame(props: { sessionID: string; verticalTabsWidth: numb
         </box>
       </Show>
       <Show when={!fullscreen() && (rightPane() === "terminal" || rightPane() === "panel") && availableWidth() >= 3}>
-        <PaneResizeHandle resize={paneResize} left={availableWidth() - paneResize.size() - 1} highlight="right" />
+        <PaneResizeHandle
+          resize={paneResize}
+          left={terminalLeft() ? paneResize.size() - 1 : availableWidth() - paneResize.size() - 1}
+          highlight={terminalLeft() ? "left" : "right"}
+        />
       </Show>
       <Show when={rightPane() === "sidebar" && !wide()}>
         <box

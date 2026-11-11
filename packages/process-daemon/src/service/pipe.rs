@@ -216,6 +216,7 @@ impl TerminalHandle {
         let reap = Arc::clone(&process);
         Ok(Self {
             order,
+            control_token: None,
             mode: ProcessMode::Pipe,
             actor_tx: actor.actor_tx,
             actor_done: actor.actor_done,

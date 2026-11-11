@@ -4,7 +4,7 @@ import { mkdir, writeFile } from "node:fs/promises"
 import net from "node:net"
 import path from "node:path"
 import { Effect, Fiber } from "effect"
-import { makeDaemonTransport } from "../src/persistent-pty/daemon"
+import { makeDaemonTransport, type StreamEvent } from "../src/persistent-pty/daemon"
 import { frame, listen, pong, temporaryDirectory, terminal, writeRegistration } from "./fixture/persistent-pty-daemon"
 import { it } from "./lib/effect"
 
@@ -301,6 +301,96 @@ function temporaryRuntime() {
     return { root, directory }
   })
 }
+
+it.live("rejects a required feature before dispatch and without retrying", () =>
+  Effect.gen(function* () {
+    const { root, directory } = yield* temporaryRuntime()
+    const socketPath = path.join(directory, "daemon.sock")
+    const ops: unknown[] = []
+    yield* listen(socketPath, (_socket, request) => {
+      ops.push(request.op)
+      return request.op === "ping" ? pong : { type: "ok" }
+    })
+    yield* Effect.promise(() => writeRegistration(directory, socketPath, "test", "test", ["controller-message"]))
+    const daemon = yield* makeDaemonTransport(root, "daemon")
+
+    const error = yield* Effect.flip(daemon.request({ op: "create_pty" }, true, "child-control"))
+
+    expect(error).toMatchObject({ kind: "feature", message: "opencode-pty does not support child-control" })
+    expect(ops).toEqual(["ping"])
+  }),
+)
+
+it.live("dispatches a request once its required feature is advertised", () =>
+  Effect.gen(function* () {
+    const { root, directory } = yield* temporaryRuntime()
+    const socketPath = path.join(directory, "daemon.sock")
+    const requests: Record<string, unknown>[] = []
+    yield* listen(socketPath, (_socket, request) => {
+      if (request.op === "ping") return pong
+      requests.push(request)
+      return { type: "ok" }
+    })
+    yield* Effect.promise(() => writeRegistration(directory, socketPath, "test", "test", ["child-control"]))
+    const daemon = yield* makeDaemonTransport(root, "daemon")
+
+    yield* daemon.request({ op: "create_pty", child_control: true }, true, "child-control")
+
+    expect(requests).toEqual([{ op: "create_pty", child_control: true }])
+  }),
+)
+
+it.live("forwards live controller messages and discards expired queued messages", () =>
+  Effect.gen(function* () {
+    const { root, directory } = yield* temporaryRuntime()
+    const socketPath = path.join(directory, "daemon.sock")
+    let subscription: net.Socket | undefined
+    yield* listen(socketPath, (socket, request) => {
+      if (request.op === "ping") return pong
+      if (request.op !== "subscribe") return { type: "ok" }
+      subscription = socket
+      return {
+        type: "attached",
+        process: terminal(1),
+        role: "controller",
+        generation: 1,
+        requested_offset: 0,
+        available_offset: 0,
+        end_offset: 0,
+        truncated: false,
+        replay_base64: "",
+      }
+    })
+    yield* Effect.promise(() => writeRegistration(directory, socketPath))
+    const daemon = yield* makeDaemonTransport(root, "daemon")
+    const events: StreamEvent[] = []
+    const attachment = yield* daemon.subscribe(1, {
+      cursor: 0,
+      attachmentID: "controller",
+      role: "controller",
+      onEvent: (event) => events.push(event),
+      onEnd: () => {},
+    })
+    try {
+      if (!subscription) throw new Error("subscription did not connect")
+      const expired = {
+        type: "controller_message" as const,
+        generation: 1,
+        message: "expired",
+        expires_at: Date.now() - 1,
+      }
+      const live = { ...expired, message: "live", expires_at: Date.now() + 10_000 }
+      subscription.write(
+        Buffer.concat([frame(expired), frame(live), frame({ type: "title_changed", title: "barrier" })]),
+      )
+      attachment.activate()
+      yield* poll(() => events.some((event) => event.type === "title_changed"))
+      expect(events).toEqual([live, { type: "title_changed", title: "barrier" }])
+    } finally {
+      attachment.detach()
+    }
+  }),
+)
 
 if (process.platform !== "win32")
   it.live("gives up at once on a daemon binary that speaks another protocol, and never starts it again", () =>

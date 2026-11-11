@@ -56,7 +56,7 @@ export const PersistentPtyGroup = HttpApiGroup.make("server.experimental")
       params: { sessionID: Session.ID },
       payload: PersistentPty.CreateInput,
       success: Schema.Struct({ data: PersistentPty.Info }),
-      error: errors,
+      error: [...errors, PtyFeatureUnsupportedError],
     }).annotateMerge(OpenApi.annotations({ identifier: "experimental.persistentPty.create" })),
   )
   .add(

@@ -12,6 +12,7 @@
   installShellFiles,
   versionCheckHook,
   writableTmpDirAsHomeHook,
+  opencode-pty,
   node_modules ? callPackage ./node_modules.nix { },
 }:
 stdenvNoCC.mkDerivation (finalAttrs: {
@@ -28,13 +29,6 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     writableTmpDirAsHomeHook
   ];
 
-  postPatch = ''
-    # NOTE: Relax Bun version check to be a warning instead of an error
-    substituteInPlace packages/script/src/index.ts \
-      --replace-fail 'throw new Error(`This script requires bun@''${expectedBunVersionRange}' \
-                     'console.warn(`Warning: This script requires bun@''${expectedBunVersionRange}'
-  '';
-
   configurePhase = ''
     runHook preConfigure
 
@@ -49,6 +43,7 @@ stdenvNoCC.mkDerivation (finalAttrs: {
   env.OPENCODE_DISABLE_MODELS_FETCH = true;
   env.OPENCODE_VERSION = finalAttrs.version;
   env.OPENCODE_CHANNEL = "prod";
+  env.OPENCODE_PTY_BIN = lib.getExe opencode-pty;
   env.NODE_OPTIONS = "--max-old-space-size=4096";
 
   buildPhase = ''
@@ -116,10 +111,14 @@ stdenvNoCC.mkDerivation (finalAttrs: {
     writableTmpDirAsHomeHook
   ];
   doInstallCheck = true;
-  versionCheckKeepEnvironment = [ "HOME" "OPENCODE_DISABLE_MODELS_FETCH" ];
+  versionCheckKeepEnvironment = [
+    "HOME"
+    "OPENCODE_DISABLE_MODELS_FETCH"
+  ];
   versionCheckProgramArg = "--version";
 
   passthru = {
+    inherit opencode-pty;
     env = finalAttrs.env;
   };
 

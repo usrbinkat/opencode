@@ -9,6 +9,8 @@ import { Keymap } from "../context/keymap"
 import { useSessionTerminals } from "../context/session-terminals"
 import { useTheme, useThemes } from "../context/theme"
 import { errorMessage } from "../util/error"
+import { useDialog } from "../ui/dialog"
+import { useConfig } from "../config"
 
 declare module "@opentui/solid" {
   interface OpenTUIComponents {
@@ -34,6 +36,9 @@ export function TerminalPane(props: {
 }) {
   const client = useClient()
   const keymap = Keymap.use()
+  const dialog = useDialog()
+  const config = useConfig()
+  const vimNavigation = () => config.data.experimental?.["vim-pane-navigation"] === true
   const leader = Keymap.useLeaderActive()
   const theme = useTheme()
   const themes = useThemes()
@@ -47,6 +52,7 @@ export function TerminalPane(props: {
   let socket: WebSocket | undefined
   let attached = false
   let controller = false
+  let controllerGeneration: number | undefined
   let restored = false
   let wantsControl = false
   let disposed = false
@@ -150,6 +156,11 @@ export function TerminalPane(props: {
       if (keymap.isLeader(event) || leader()) return
       event.preventDefault()
       event.stopPropagation()
+      // OpenTUI names these bytes backspace/linefeed; the child decides what they mean.
+      if (vimNavigation() && event.source === "raw" && (event.raw === "\b" || event.raw === "\n")) {
+        sendInput(Buffer.from(event.raw))
+        return
+      }
       terminal.handleKeyPress(event)
     },
     { priority: 100 },
@@ -211,6 +222,20 @@ export function TerminalPane(props: {
       const decoded = decodePersistentPtyMessage(event.data)
       if (Option.isNone(decoded)) return
       const message = decoded.value
+      if (message.type === "controller_message") {
+        if (!vimNavigation()) return
+        if (!attached || !controller || !restored || exited || !terminal?.focused || dialog.stack.length) return
+        if (message.generation !== controllerGeneration) return
+        switch (message.message) {
+          case "pane.navigate.left":
+          case "pane.navigate.down":
+          case "pane.navigate.up":
+          case "pane.navigate.right":
+          case "pane.navigate.previous":
+            keymap.dispatch(message.message)
+        }
+        return
+      }
       if (message.type === "exited") {
         exited = true
         return
@@ -229,6 +254,7 @@ export function TerminalPane(props: {
       }
       if (message.type === "controller_changed") {
         const previous = controller
+        controllerGeneration = message.generation
         controller = message.attachmentID === attachmentID
         if (controller && !previous && restored) interact()
         return
@@ -241,6 +267,7 @@ export function TerminalPane(props: {
       }
       enqueue({ type: "resize", size: { cols: message.info.size.cols, rows: message.info.size.rows } })
       controller = message.role === "controller"
+      controllerGeneration = message.generation
       attached = true
     })
     next.addEventListener("error", () => {

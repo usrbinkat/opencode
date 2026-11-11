@@ -13,6 +13,46 @@ import { createAppFixture } from "./fixture/app"
 import { directory, json } from "./fixture/tui-client"
 import { tmpdir } from "./fixture/fixture"
 
+test.each([false, true])("navigation commands respect experiment, dialog, and fullscreen gates: %s", async (vim) => {
+  await using state = await tmpdir()
+  await using setup = await createSessionFixture(state.path, {
+    experimental: { "vim-pane-navigation": vim },
+    keybinds: { "pane.navigate.left": "f8", "pane.navigate.right": "f9", "pane.navigate.previous": "f10" },
+  })
+  await ready(setup)
+  const prompt = editor(setup)
+  setup.mockInput.pressKey("F6")
+  await panelReady(setup)
+  const panel = node(setup, "session-panel")
+  setup.mockInput.pressKey("F8")
+  await setup.flush()
+  expect(setup.renderer.currentFocusedRenderable).toBe(vim ? prompt : panel)
+  if (vim) {
+    setup.mockInput.pressKey("F8")
+    await setup.flush()
+    expect(setup.renderer.currentFocusedRenderable).toBe(prompt)
+    setup.mockInput.pressKey("F9")
+    await setup.waitFor(() => setup.renderer.currentFocusedRenderable === panel)
+  }
+  setup.mockInput.pressKey("p", { ctrl: true })
+  await setup.waitFor(() => setup.renderer.currentFocusedRenderable instanceof InputRenderable)
+  const dialogFocus = setup.renderer.currentFocusedRenderable
+  setup.mockInput.pressKey("F8")
+  setup.mockInput.pressKey("F9")
+  setup.mockInput.pressKey("F10")
+  await setup.flush()
+  expect(setup.renderer.currentFocusedRenderable === dialogFocus).toBe(true)
+  setup.mockInput.pressEscape()
+  await setup.waitFor(() => setup.renderer.currentFocusedRenderable === panel)
+  setup.mockInput.pressKey("f")
+  await setup.waitFor(() => panel.width === setup.renderer.width)
+  setup.mockInput.pressKey("F8")
+  setup.mockInput.pressKey("F10")
+  await setup.flush()
+  expect(setup.renderer.currentFocusedRenderable).toBe(panel)
+  expect(prompt.plainText).toBe("")
+})
+
 test("/diff focuses the production session panel without sending typing to the prompt", async () => {
   await using state = await tmpdir()
   await using setup = await createSessionFixture(state.path)
@@ -555,6 +595,7 @@ async function createSessionFixture(
     tabs?: Config.Info["tabs"]
     diffs?: Config.Info["diffs"]
     keybinds?: Config.Info["keybinds"]
+    experimental?: Config.Info["experimental"]
     permission?: boolean
     form?: boolean
   } = {},
@@ -607,6 +648,7 @@ async function createSessionFixture(
     args: { sessionID: session.id },
     config: {
       animations: false,
+      experimental: input.experimental,
       tabs: input.tabs ?? { enabled: false },
       session: { sidebar: "hide" },
       // Keep patch geometry stable while testing host presentation changes, not split/unified diff layout.

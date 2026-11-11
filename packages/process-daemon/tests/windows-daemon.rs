@@ -93,6 +93,7 @@ impl Daemon {
             title,
             cols,
             rows,
+            child_control,
         } = request;
         match self.request(Request::CreatePty {
             program,
@@ -103,6 +104,7 @@ impl Daemon {
             title,
             cols,
             rows,
+            child_control,
         }) {
             Response::Created { process } => process,
             response => panic!("create: {response:?}"),

@@ -102,10 +102,16 @@ export function frame(value: object) {
   return output
 }
 
-export function writeRegistration(directory: string, socket: string, instance = "test", token = "test") {
+export function writeRegistration(
+  directory: string,
+  socket: string,
+  instance = "test",
+  token = "test",
+  features: string[] = [],
+) {
   return writeFile(
     path.join(directory, "service.json"),
-    JSON.stringify({ instance_id: instance, pid: process.pid, protocol: 8, socket, token, features: [] }),
+    JSON.stringify({ instance_id: instance, pid: process.pid, protocol: 8, socket, token, features }),
   )
 }
 
@@ -128,7 +134,7 @@ type Process = {
 // An in-process opencode-pty that a server adopts through a handoff, so no daemon is spawned. Pipe processes
 // run nothing: they stay running until `exit` or a signal ends them (SIGTERM spares those in `trap`), and
 // write only what `output` gives them.
-export const fakeDaemon = Effect.fn(function* () {
+export const fakeDaemon = Effect.fn(function* (features: string[] = []) {
   const base = yield* temporaryDirectory()
   const root = path.join(base, "root")
   const directory = path.join(root, "inherited")
@@ -263,7 +269,7 @@ export const fakeDaemon = Effect.fn(function* () {
   })
   yield* Effect.promise(async () => {
     await mkdir(directory, { recursive: true })
-    await writeRegistration(directory, socket)
+    await writeRegistration(directory, socket, "test", "test", features)
   })
   return {
     failTerminate,

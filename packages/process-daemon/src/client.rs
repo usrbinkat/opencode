@@ -168,6 +168,7 @@ impl TerminalClient {
             title: request.title,
             cols: request.cols,
             rows: request.rows,
+            child_control: request.child_control,
         })? {
             Response::Created { process } => Ok(process),
             response => unexpected(response),
@@ -637,6 +638,7 @@ fn play(directory: &Path) -> Result<()> {
                         cwd: env::current_dir()?,
                         cols: 100,
                         rows: 30,
+                        child_control: false,
                     }
                 };
                 let info = client.create_pty(request)?;
@@ -717,6 +719,7 @@ fn play(directory: &Path) -> Result<()> {
                     cwd: env::current_dir()?,
                     cols: 100,
                     rows: 30,
+                    child_control: false,
                 })?;
                 active = Some(info.id);
                 thread::sleep(Duration::from_millis(200));

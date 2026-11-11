@@ -10,9 +10,9 @@ use crate::service::{
 };
 
 pub const PROTOCOL_VERSION: u32 = 8;
-/// Additive capabilities of this daemon. Breaking changes bump
-/// `PROTOCOL_VERSION`; everything in protocol 8 needs no feature.
-pub const FEATURES: &[&str] = &[];
+/// Additive capabilities of this daemon. Breaking changes bump `PROTOCOL_VERSION`.
+/// `child-control` guarantees `create_pty` honors `child_control`.
+pub const FEATURES: &[&str] = &["controller-message", "child-control"];
 
 pub fn features() -> Vec<String> {
     FEATURES.iter().map(|feature| feature.to_string()).collect()
@@ -36,6 +36,11 @@ pub struct Envelope {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "op")]
 pub enum Request {
+    /// A child-scoped credential permits only delivery to its own controller.
+    NotifyController {
+        id: TerminalId,
+        message: String,
+    },
     Ping,
     Own {
         instance_id: String,
@@ -51,6 +56,9 @@ pub enum Request {
         title: String,
         cols: u16,
         rows: u16,
+        /// Older daemons ignore this field; clients must require `child-control`.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        child_control: bool,
     },
     /// Unix only. The child gets exactly `env`; `cwd` and `output_path` must
     /// be absolute.
@@ -138,6 +146,11 @@ pub enum Request {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "type")]
 pub enum Response {
+    ControllerMessage {
+        generation: u64,
+        message: String,
+        expires_at: u64,
+    },
     Owned,
     Handoff {
         ticket: String,
@@ -364,9 +377,9 @@ mod tests {
     }
 
     #[test]
-    fn version_8_has_no_features() {
+    fn version_8_advertises_controller_messages_and_child_control() {
         assert_eq!(PROTOCOL_VERSION, 8);
-        assert!(features().is_empty());
+        assert_eq!(features(), ["controller-message", "child-control"]);
         // `features` is required.
         assert!(
             serde_json::from_value::<Response>(
@@ -390,6 +403,16 @@ mod tests {
             Request::CreatePty {
                 cols: 80,
                 rows: 24,
+                child_control: false,
+                ..
+            }
+        ));
+        let mut controlled = pty.clone();
+        controlled["child_control"] = json!(true);
+        assert!(matches!(
+            round_trip::<Request>(controlled),
+            Request::CreatePty {
+                child_control: true,
                 ..
             }
         ));

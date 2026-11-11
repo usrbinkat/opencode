@@ -4516,6 +4516,7 @@ export type ExperimentalPersistentPtyCreateInput = {
   readonly title: string
   readonly env: { readonly [x: string]: string }
   readonly size?: { readonly cols: number; readonly rows: number } | undefined
+  readonly childControl?: boolean | undefined
 }
 
 export type ExperimentalPersistentPtyCreateOutput = { data: PersistentPtyInfo }["data"]

@@ -1517,6 +1517,7 @@ const EndpointExperimentalPersistentPtyCreate =
           title: input["title"],
           env: input["env"],
           size: input["size"],
+          childControl: input["childControl"],
         },
       }).pipe(
         Effect.mapError(mapClientError),

@@ -16,6 +16,17 @@ type Experiment = {
 // unconditional) or dies (delete the entry and the branch it gated).
 export const experiments: Experiment[] = [
   {
+    id: "vim-pane-navigation",
+    title: "Vim pane navigation",
+    description:
+      "Use Ctrl+H/L and Ctrl+\\ in chat; Ctrl+J/K keep editing. Neovim requires explicit setup in a new terminal. Disabling stops pane navigation immediately; existing editor mappings remain until restart.",
+  },
+  {
+    id: "terminal-left",
+    title: "Terminal on the left",
+    description: "Place the built-in terminal to the left of chat",
+  },
+  {
     id: "new-designs",
     title: "New designs",
     description: "Preview the new TUI designs",

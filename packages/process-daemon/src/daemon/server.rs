@@ -167,7 +167,8 @@ fn serve(
     let registration = runtime.registration.clone();
     let registration = &registration;
 
-    let service = Arc::new(TerminalService::default());
+    let service =
+        Arc::new(TerminalService::default().with_control_socket(registration.socket.clone()));
     let mut handlers = Vec::<Handler>::new();
     let result = (|| -> Result<()> {
         let mut ready = Readiness::default();
@@ -314,6 +315,15 @@ fn handle_connection(
     control: &Control,
 ) -> Result<()> {
     let (token, request) = read_envelope(&mut stream)?;
+    if let Ok(Request::NotifyController { id, message }) = request {
+        let response = service
+            .notify_controller(id, &token, message)
+            .map(|()| Response::Ok)
+            .unwrap_or_else(|error| Response::Error {
+                message: error.to_string(),
+            });
+        return send_response(&mut stream, &response);
+    }
     if token != registration.token {
         return send_response(
             &mut stream,
@@ -493,6 +503,15 @@ fn stream_subscription(
             },
         };
         let response = match event {
+            StreamEvent::ControllerMessage {
+                generation,
+                message,
+                expires_at,
+            } => Response::ControllerMessage {
+                generation,
+                message,
+                expires_at,
+            },
             StreamEvent::Output { start, end, bytes } => {
                 write_output_frame(&mut *stream, start, end, &bytes)?;
                 continue;
@@ -597,6 +616,7 @@ fn dispatch(
             title,
             cols,
             rows,
+            child_control,
         } => Response::Created {
             process: service.create_pty(CreatePty {
                 program,
@@ -607,6 +627,7 @@ fn dispatch(
                 title,
                 cols,
                 rows,
+                child_control,
             })?,
         },
         Request::CreatePipe {
@@ -727,6 +748,9 @@ fn dispatch(
         }
         Request::Shutdown => Response::Ok,
         Request::Own { .. } => unreachable!("ownership is handled before dispatch"),
+        Request::NotifyController { .. } => {
+            unreachable!("child messages are authenticated before dispatch")
+        }
         Request::PrepareHandoff => Response::Error {
             message: "handoff requires the owner connection".to_string(),
         },
@@ -1146,6 +1170,7 @@ mod tests {
                 title: "t".into(),
                 cols: 80,
                 rows: 24,
+                child_control: false,
             },
         ) else {
             panic!("create_pty");

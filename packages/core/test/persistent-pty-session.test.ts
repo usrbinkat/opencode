@@ -110,6 +110,54 @@ describe("PersistentPty rename", () => {
   )
 })
 
+describe("PersistentPty child control", () => {
+  const create = (childControl?: boolean) =>
+    Effect.gen(function* () {
+      const pty = yield* PersistentPty.Service
+      const directory = yield* tmpdirScoped()
+      return yield* pty.create(Session.ID.make("ses_control"), {
+        args: [],
+        cwd: directory.path,
+        title: "test",
+        env: {},
+        ...(childControl === undefined ? {} : { childControl }),
+      })
+    })
+
+  it.live("omits the wire field unless child control is requested", () =>
+    Effect.gen(function* () {
+      const daemon = yield* fakeDaemon()
+      yield* Effect.gen(function* () {
+        yield* create()
+        yield* create(false)
+      }).pipe(Effect.provide(layer(daemon)))
+      const created = daemon.requests.filter((request) => request.op === "create_pty")
+      expect(created).toHaveLength(2)
+      expect(created.map((request) => "child_control" in request)).toEqual([false, false])
+    }),
+  )
+
+  it.live("sends the wire field to a daemon advertising child control", () =>
+    Effect.gen(function* () {
+      const daemon = yield* fakeDaemon(["child-control"])
+      yield* create(true).pipe(Effect.provide(layer(daemon)))
+      expect(daemon.requests.filter((request) => request.op === "create_pty")).toEqual([
+        expect.objectContaining({ child_control: true }),
+      ])
+    }),
+  )
+
+  it.live("fails before creating a terminal on a daemon without child control", () =>
+    Effect.gen(function* () {
+      const daemon = yield* fakeDaemon(["controller-message"])
+      const error = yield* Effect.flip(create(true).pipe(Effect.provide(layer(daemon))))
+      expect(error).toMatchObject({ _tag: "PersistentPty.UnsupportedFeatureError", feature: "child-control" })
+      expect(daemon.ops).not.toContain("create_pty")
+      expect(daemon.processes).toEqual([])
+    }),
+  )
+})
+
 // Pipe mode is Unix-only: Windows daemons reject create_pipe, so OpenCode keeps spawning shell commands there.
 describe.skipIf(process.platform === "win32")("PersistentPty pipe processes", () => {
   const input = {

@@ -67,6 +67,12 @@ type Registration = typeof Registration.Type
 
 export const WireResponse = Schema.Union([
   Schema.Struct({
+    type: Schema.Literal("controller_message"),
+    generation: Schema.Number,
+    message: Schema.String,
+    expires_at: Schema.Number,
+  }),
+  Schema.Struct({
     type: Schema.Literal("pong"),
     instance_id: Schema.String,
     pid: Schema.Number,
@@ -137,6 +143,12 @@ export type Exited = Extract<WireResponse, { type: "exited" }>
 export type Role = "controller" | "observer"
 
 export type StreamEvent =
+  | {
+      readonly type: "controller_message"
+      readonly generation: number
+      readonly message: string
+      readonly expires_at: number
+    }
   | { readonly type: "output"; readonly start: number; readonly end: number; readonly data: Uint8Array }
   | {
       readonly type: "resized"
@@ -177,16 +189,16 @@ export type DaemonAttachment = {
 /**
  * `connect`, `spawn`, `registration` and `protocol` mean the daemon could not be reached or started and the
  * request never ran. `response` means the request was sent but its reply was lost. `request` is the daemon's
- * own `error` reply.
+ * own `error` reply. `feature` means the running daemon lacks a required capability, so the request never ran.
  */
 export class DaemonError extends Data.TaggedError("PersistentPty.DaemonError")<{
-  readonly kind: "connect" | "response" | "registration" | "protocol" | "spawn" | "request"
+  readonly kind: "connect" | "response" | "registration" | "protocol" | "spawn" | "request" | "feature"
   readonly message: string
   readonly pid?: number
 }> {}
 
 export interface DaemonTransport {
-  readonly request: (value: object, start?: boolean) => Effect.Effect<WireResponse, DaemonError>
+  readonly request: (value: object, start?: boolean, feature?: string) => Effect.Effect<WireResponse, DaemonError>
   readonly requestIfRunning: (value: object) => Effect.Effect<WireResponse | undefined, DaemonError>
   /** Waits on its own connection, with no timeout, until the pipe process exits. Never starts the daemon. */
   readonly wait: (id: number) => Effect.Effect<Exited, DaemonError>
@@ -372,18 +384,27 @@ export const makeDaemonTransport = Effect.fn("PersistentPty.makeDaemonTransport"
       )
     })
 
-  const attempt = Effect.fn("PersistentPty.daemon.request-attempt")((value: object, shouldStart: boolean) =>
-    withRegistration(shouldStart, (current) => oneShot(current, value)),
+  const attempt = Effect.fn("PersistentPty.daemon.request-attempt")(
+    (value: object, shouldStart: boolean, feature?: string) =>
+      withRegistration(shouldStart, (current) =>
+        feature !== undefined && !current.features.includes(feature)
+          ? Effect.fail(new DaemonError({ kind: "feature", message: `opencode-pty does not support ${feature}` }))
+          : oneShot(current, value),
+      ),
   )
 
-  const request = Effect.fn("PersistentPty.daemon.request")(function* (value: object, shouldStart = false) {
-    return yield* attempt(value, shouldStart).pipe(
+  const request = Effect.fn("PersistentPty.daemon.request")(function* (
+    value: object,
+    shouldStart = false,
+    feature?: string,
+  ) {
+    return yield* attempt(value, shouldStart, feature).pipe(
       Effect.catch((error) => {
-        if (error.kind === "registration") return attempt(value, shouldStart)
+        if (error.kind === "registration") return attempt(value, shouldStart, feature)
         if (error.kind !== "connect") return Effect.fail(error)
         registration = undefined
         if (!shouldStart) return Effect.fail(error)
-        return attempt(value, true)
+        return attempt(value, true, feature)
       }),
     )
   })
@@ -628,6 +649,7 @@ async function subscribePromise(
             continue
           }
           const event = decode(frame)
+          if (event.type === "controller_message" && event.expires_at > Date.now()) input.onEvent(event)
           if (event.type === "resized")
             input.onEvent({
               type: "resized",

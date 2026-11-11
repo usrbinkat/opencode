@@ -6,10 +6,16 @@ import type { ExperimentalPersistentPtyConnectTokenInput, OpenCodeClient } from 
 // message it depends on.
 export const PersistentPtyMessage = Schema.Union([
   Schema.Struct({
+    type: Schema.Literal("controller_message"),
+    generation: Schema.Number,
+    message: Schema.String,
+  }),
+  Schema.Struct({
     type: Schema.Literal("attached"),
     inputProtocol: Schema.optional(Schema.Number),
     info: Schema.Struct({ size: PersistentPty.Info.fields.size }),
     role: Schema.optional(Schema.Literals(["controller", "observer"])),
+    generation: Schema.optional(Schema.Number),
   }),
   Schema.Struct({ type: Schema.Literal("replay_complete") }),
   Schema.Struct({
@@ -21,6 +27,7 @@ export const PersistentPtyMessage = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("controller_changed"),
     attachmentID: Schema.optional(Schema.NullOr(Schema.String)),
+    generation: Schema.optional(Schema.Number),
   }),
   Schema.Struct({
     type: Schema.Literal("exited"),

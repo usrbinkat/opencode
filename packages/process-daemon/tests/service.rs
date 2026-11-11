@@ -69,6 +69,7 @@ fn command(script: &str) -> CreatePty {
         env: std::collections::HashMap::new(),
         cols: 80,
         rows: 24,
+        child_control: false,
     }
 }
 

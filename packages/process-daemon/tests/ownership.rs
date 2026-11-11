@@ -24,6 +24,10 @@ struct Daemon {
 
 impl Daemon {
     fn start() -> Self {
+        Self::start_with_env(&[])
+    }
+
+    fn start_with_env(env: &[(&str, &str)]) -> Self {
         let root = std::env::temp_dir().join(format!(
             "opencode-pty-ownership-{:032x}",
             rand::random::<u128>()
@@ -32,6 +36,7 @@ impl Daemon {
         let mut child = Command::new(env!("CARGO_BIN_EXE_opencode-pty"))
             .args(["daemon", "--name", "test", "--runtime-dir"])
             .arg(&root)
+            .envs(env.iter().copied())
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .spawn()
@@ -101,15 +106,29 @@ impl Daemon {
     }
 
     fn terminal(&self, command: &str) -> ProcessInfo {
+        self.create_terminal(command, Default::default(), false)
+    }
+
+    fn controlled_terminal(&self, command: &str) -> ProcessInfo {
+        self.create_terminal(command, Default::default(), true)
+    }
+
+    fn create_terminal(
+        &self,
+        command: &str,
+        env: std::collections::HashMap<String, String>,
+        child_control: bool,
+    ) -> ProcessInfo {
         match self.request(Request::CreatePty {
             program: "/bin/sh".into(),
             args: vec!["-c".into(), command.into()],
             cwd: self.directory.clone(),
-            env: Default::default(),
+            env,
             group_id: "ownership".into(),
             title: "ownership".into(),
             cols: 80,
             rows: 24,
+            child_control,
         }) {
             Response::Created { process } => process,
             response => panic!("create: {response:?}"),
@@ -314,10 +333,13 @@ fn rename_is_served() {
     use opencode_pty::protocol::{SubscriptionEvent, read_subscription_event};
 
     let mut daemon = Daemon::start();
-    assert!(daemon.registration.features.is_empty());
+    assert_eq!(
+        daemon.registration.features,
+        ["controller-message", "child-control"]
+    );
     assert!(matches!(
         daemon.request(Request::Ping),
-        Response::Pong { protocol: 8, features, .. } if features.is_empty()
+        Response::Pong { protocol: 8, features, .. } if features == daemon.registration.features
     ));
     let (owner, response) = daemon.own(None);
     assert!(matches!(response, Response::Owned));
@@ -365,6 +387,242 @@ fn rename_is_served() {
         Response::Error { .. }
     ));
     drop(subscription);
+    drop(owner);
+    daemon.wait();
+}
+
+#[test]
+fn child_credentials_isolate_controller_delivery_across_takeover() {
+    use opencode_pty::protocol::{SubscriptionEvent, read_subscription_event};
+
+    let mut daemon = Daemon::start();
+    let (owner, response) = daemon.own(None);
+    assert!(matches!(response, Response::Owned));
+    let first = daemon.controlled_terminal(
+        "umask 077; printf '%s' \"$OPENCODE_PTY_CONTROL_TOKEN\" > ../first.auth; exec cat",
+    );
+    let second = daemon.controlled_terminal(
+        "umask 077; printf '%s' \"$OPENCODE_PTY_CONTROL_TOKEN\" > ../second.auth; exec cat",
+    );
+    let credential = |name| {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            if let Ok(value) = std::fs::read_to_string(daemon.root.join(name))
+                && !value.is_empty()
+            {
+                return value;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "child did not publish its credential"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    };
+    let first_key = credential("first.auth");
+    let second_key = credential("second.auth");
+    assert_ne!(first_key, second_key);
+    let child_request = |key: &str, request| {
+        let mut stream = daemon.connect();
+        write_frame(
+            &mut stream,
+            &Envelope {
+                token: key.into(),
+                request,
+            },
+        )
+        .unwrap();
+        read_frame::<Response>(&mut stream).unwrap()
+    };
+    let notify = |id, message: &str| Request::NotifyController {
+        id,
+        message: message.into(),
+    };
+    for request in [
+        Request::Ping,
+        Request::Shutdown,
+        Request::Get { id: first.id },
+    ] {
+        assert!(matches!(
+            child_request(&first_key, request),
+            Response::Error { .. }
+        ));
+    }
+    assert!(matches!(
+        child_request(&first_key, notify(second.id, "isolated")),
+        Response::Error { .. }
+    ));
+    assert!(matches!(
+        child_request(&second_key, notify(first.id, "isolated")),
+        Response::Error { .. }
+    ));
+    assert!(matches!(
+        child_request("invalid", notify(first.id, "isolated")),
+        Response::Error { .. }
+    ));
+    assert!(matches!(
+        child_request(&first_key, notify(first.id, "unattached")),
+        Response::Error { .. }
+    ));
+
+    let attach = |attachment: &str, takeover| {
+        let mut stream = daemon.connect();
+        let Response::Attached {
+            generation,
+            replay_base64,
+            ..
+        } = daemon.send(
+            &mut stream,
+            Request::Subscribe {
+                id: first.id,
+                offset: 0,
+                attachment_id: attachment.into(),
+                role: AttachmentRole::Controller,
+                takeover,
+            },
+        )
+        else {
+            panic!("controller attachment failed")
+        };
+        assert!(
+            replay_base64.is_empty(),
+            "control messages leaked into terminal replay"
+        );
+        (stream, generation)
+    };
+    let receive = |stream: &mut UnixStream, expected_generation, expected_message: &str| {
+        loop {
+            match read_subscription_event(&mut *stream).unwrap() {
+                SubscriptionEvent::Response(response) => match *response {
+                    Response::ControllerMessage {
+                        generation,
+                        message,
+                        expires_at,
+                    } => {
+                        assert_eq!(generation, expected_generation);
+                        assert_eq!(message, expected_message);
+                        assert!(expires_at > 0);
+                        break;
+                    }
+                    Response::Error { message } => panic!("subscription: {message}"),
+                    _ => {}
+                },
+                SubscriptionEvent::Output { .. } => {
+                    panic!("control message produced terminal output")
+                }
+            }
+        }
+    };
+    let (mut original, original_generation) = attach("original", false);
+    assert!(matches!(
+        child_request(&first_key, notify(first.id, "first")),
+        Response::Ok
+    ));
+    receive(&mut original, original_generation, "first");
+    let (mut successor, successor_generation) = attach("successor", true);
+    assert!(successor_generation > original_generation);
+    assert!(matches!(
+        child_request(&first_key, notify(first.id, "second")),
+        Response::Ok
+    ));
+    receive(&mut successor, successor_generation, "second");
+    assert!(matches!(
+        daemon.request(Request::Rename {
+            id: first.id,
+            title: Some("barrier".into())
+        }),
+        Response::Ok
+    ));
+    loop {
+        if let SubscriptionEvent::Response(response) =
+            read_subscription_event(&mut original).unwrap()
+        {
+            match *response {
+                Response::ControllerMessage { .. } => {
+                    panic!("message reached superseded controller")
+                }
+                Response::TitleChanged { title } if title == "barrier" => break,
+                _ => {}
+            }
+        }
+    }
+    drop(original);
+    drop(successor);
+    assert!(matches!(
+        daemon.request(Request::Terminate { id: first.id }),
+        Response::Ok
+    ));
+    assert!(matches!(
+        child_request(&first_key, notify(first.id, "removed")),
+        Response::Error { .. }
+    ));
+    drop(owner);
+    daemon.wait();
+}
+
+#[test]
+fn child_control_environment_is_daemon_owned() {
+    let reserved = [
+        "OPENCODE_PTY_CONTROL_SOCKET",
+        "OPENCODE_PTY_CONTROL_TOKEN",
+        "OPENCODE_PTY_ID",
+    ];
+    let inherited = reserved.map(|key| (key, "inherited"));
+    let mut daemon = Daemon::start_with_env(&inherited);
+    let (owner, response) = daemon.own(None);
+    assert!(matches!(response, Response::Owned));
+    let caller = reserved
+        .iter()
+        .map(|key| (key.to_string(), "caller".to_string()))
+        .collect::<std::collections::HashMap<_, _>>();
+    let publish = |name: &str| {
+        format!(
+            "umask 077; printf '%s|%s|%s' \"${{OPENCODE_PTY_CONTROL_SOCKET-unset}}\" \"${{OPENCODE_PTY_CONTROL_TOKEN-unset}}\" \"${{OPENCODE_PTY_ID-unset}}\" > ../{name}.tmp; mv ../{name}.tmp ../{name}.env; exec cat"
+        )
+    };
+    let read = |name: &str| {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            if let Ok(value) = std::fs::read_to_string(daemon.root.join(format!("{name}.env"))) {
+                return value;
+            }
+            assert!(Instant::now() < deadline, "child did not publish {name}");
+            thread::sleep(Duration::from_millis(10));
+        }
+    };
+    let omitted = daemon.create_terminal(&publish("omitted"), Default::default(), false);
+    let supplied = daemon.create_terminal(&publish("supplied"), caller.clone(), false);
+    let controlled = daemon.create_terminal(&publish("controlled"), caller, true);
+    assert_eq!(read("omitted"), "unset|unset|unset");
+    assert_eq!(read("supplied"), "unset|unset|unset");
+    let authoritative = read("controlled");
+    let values = authoritative.split('|').collect::<Vec<_>>();
+    assert_eq!(values[0], daemon.registration.socket.to_str().unwrap());
+    assert_ne!(values[1], "caller");
+    assert_ne!(values[1], "inherited");
+    assert_eq!(values[2], controlled.id.to_string());
+    let notify = |id, token: &str| {
+        let mut stream = daemon.connect();
+        write_frame(
+            &mut stream,
+            &Envelope {
+                token: token.into(),
+                request: Request::NotifyController {
+                    id,
+                    message: "pane.navigate.left".into(),
+                },
+            },
+        )
+        .unwrap();
+        read_frame::<Response>(&mut stream).unwrap()
+    };
+    for id in [omitted.id, supplied.id] {
+        for token in ["inherited", "caller", values[1]] {
+            assert!(
+                matches!(notify(id, token), Response::Error { message } if message == "authentication failed")
+            );
+        }
+    }
     drop(owner);
     daemon.wait();
 }

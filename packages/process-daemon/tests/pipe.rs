@@ -254,6 +254,7 @@ fn terminal_requests_are_rejected_and_lists_are_separate() {
             title: "pty".into(),
             cols: 80,
             rows: 24,
+            child_control: false,
         })
         .unwrap();
     assert!(pty.pipe.is_none());

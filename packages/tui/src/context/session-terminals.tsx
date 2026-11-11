@@ -5,6 +5,7 @@ import { useClient } from "./client"
 import { useData } from "./data"
 import { useEvent } from "./event"
 import { useStorage } from "./storage"
+import { useConfig } from "../config"
 
 type SessionTerminalsState = {
   sessions: Record<string, string | null>
@@ -14,6 +15,7 @@ export const { use: useSessionTerminals, provider: SessionTerminalsProvider } = 
   name: "SessionTerminals",
   init: () => {
     const client = useClient()
+    const config = useConfig()
     const data = useData()
     const event = useEvent()
     const [available, setAvailable] = createSignal(false)
@@ -107,6 +109,7 @@ export const { use: useSessionTerminals, provider: SessionTerminalsProvider } = 
           cwd: session?.location.directory,
           title: "Terminal",
           env: {},
+          ...(config.data.experimental?.["vim-pane-navigation"] === true ? { childControl: true } : {}),
         })
         await refresh(sessionID)
         await selectTerminal(sessionID, terminal.id, options)

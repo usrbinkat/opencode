@@ -32,6 +32,13 @@ const OUTPUT_BATCH_BYTES: usize = 8 * 1024;
 const OUTPUT_BATCH_DELAY: Duration = Duration::from_millis(1);
 const MAX_INPUT_BYTES: usize = 1024 * 1024;
 const MAX_ROWS_BYTES: usize = 1024 * 1024;
+// UI requests must expire while terminal output backpressures the actor.
+const CONTROLLER_MESSAGE_TIMEOUT: Duration = Duration::from_millis(250);
+const CHILD_CONTROL_ENV: [&str; 3] = [
+    "OPENCODE_PTY_CONTROL_SOCKET",
+    "OPENCODE_PTY_CONTROL_TOKEN",
+    "OPENCODE_PTY_ID",
+];
 
 pub type TerminalId = u64;
 
@@ -170,6 +177,11 @@ pub struct RawReplay {
 
 #[derive(Clone, Debug)]
 pub enum StreamEvent {
+    ControllerMessage {
+        generation: u64,
+        message: String,
+        expires_at: u64,
+    },
     Output {
         start: u64,
         end: u64,
@@ -246,6 +258,8 @@ pub struct CreatePty {
     pub title: String,
     pub cols: u16,
     pub rows: u16,
+    /// Allocates a child credential scoped to this terminal.
+    pub child_control: bool,
 }
 
 impl CreatePty {
@@ -265,6 +279,7 @@ impl CreatePty {
             title,
             cols: DEFAULT_COLS,
             rows: DEFAULT_ROWS,
+            child_control: false,
         })
     }
 }
@@ -287,6 +302,7 @@ pub struct TerminalService {
     terminals: Mutex<HashMap<TerminalId, Arc<TerminalHandle>>>,
     created: AtomicU64,
     replay_capacity: usize,
+    control_socket: Option<PathBuf>,
 }
 
 impl Default for TerminalService {
@@ -301,14 +317,51 @@ impl TerminalService {
             terminals: Mutex::new(HashMap::new()),
             created: AtomicU64::new(0),
             replay_capacity,
+            control_socket: None,
         }
+    }
+
+    /// Sets the endpoint children receive when they are created with child control.
+    pub fn with_control_socket(mut self, socket: PathBuf) -> Self {
+        self.control_socket = Some(socket);
+        self
     }
 
     pub fn create_pty(&self, request: CreatePty) -> Result<ProcessInfo> {
         validate_size(request.cols, request.rows)?;
         validate_program(&request.program)?;
+        if request.child_control && self.control_socket.is_none() {
+            bail!("child control requires a daemon control socket");
+        }
         let replay_capacity = self.replay_capacity;
-        self.insert(|id, order| TerminalHandle::spawn_pty(id, order, request, replay_capacity))
+        let control_socket = self.control_socket.as_deref();
+        self.insert(|id, order| {
+            TerminalHandle::spawn_pty(id, order, request, replay_capacity, control_socket)
+        })
+    }
+
+    /// Delivers an ephemeral child message to the current controller, never to replay.
+    pub fn notify_controller(&self, id: TerminalId, token: &str, message: String) -> Result<()> {
+        let terminal = self.pty(id)?;
+        if terminal.control_token.as_deref() != Some(token) {
+            bail!("authentication failed");
+        }
+        if message.is_empty() || message.len() > 256 {
+            bail!("controller message must contain 1 to 256 bytes");
+        }
+        let deadline = Instant::now() + CONTROLLER_MESSAGE_TIMEOUT;
+        let (reply, response) = bounded(1);
+        terminal
+            .actor_tx
+            .try_send(ActorMessage::NotifyController {
+                message,
+                deadline,
+                reply,
+            })
+            .map_err(|_| anyhow!("terminal actor is unavailable or busy"))?;
+        response
+            .recv_deadline(deadline)
+            .map_err(|_| anyhow!("terminal controller request expired or actor stopped"))?
     }
 
     /// Starts a pipe process. Unix only.
@@ -630,6 +683,8 @@ impl Drop for TerminalService {
 }
 
 struct TerminalHandle {
+    // Registered and removed with the process; never exposed in ProcessInfo.
+    control_token: Option<String>,
     /// Creation sequence number; orders `list` results.
     order: u64,
     mode: ProcessMode,
@@ -725,6 +780,7 @@ impl TerminalHandle {
         order: u64,
         request: CreatePty,
         replay_capacity: usize,
+        control_socket: Option<&std::path::Path>,
     ) -> Result<Self> {
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -744,6 +800,20 @@ impl TerminalHandle {
         }
         command.env("TERM", "xterm-256color");
         command.env("COLORTERM", "truecolor");
+        // CommandBuilder starts from the daemon's environment, which can belong to another terminal.
+        for key in CHILD_CONTROL_ENV {
+            command.env_remove(key);
+        }
+        let mut control_token = None;
+        if request.child_control
+            && let Some(socket) = control_socket
+        {
+            let token = format!("{:032x}", rand::random::<u128>());
+            command.env("OPENCODE_PTY_CONTROL_SOCKET", socket);
+            command.env("OPENCODE_PTY_ID", id.to_string());
+            command.env("OPENCODE_PTY_CONTROL_TOKEN", &token);
+            control_token = Some(token);
+        }
 
         let child = pair
             .slave
@@ -874,6 +944,7 @@ impl TerminalHandle {
         Ok(Self {
             order,
             mode: ProcessMode::Pty,
+            control_token,
             actor_tx: actor.actor_tx,
             actor_done: actor.actor_done,
             shutdown_tx: Mutex::new(Some(actor.shutdown_tx)),
@@ -1006,6 +1077,11 @@ fn await_reply<T>(reply: &Receiver<Result<T>>, actor_done: &Receiver<()>) -> Res
 }
 
 enum ActorMessage {
+    NotifyController {
+        message: String,
+        deadline: Instant,
+        reply: Reply<Result<()>>,
+    },
     /// `newlines` counts the `\n` bytes of `bytes` that reached the output
     /// file; always 0 for PTYs.
     Output {
@@ -1204,6 +1280,39 @@ fn run_actor(config: ActorConfig) -> Result<()> {
 
     let result = loop {
         match receive_actor_message(&messages, &mut pending_message, &shutdown) {
+            Ok(ActorMessage::NotifyController {
+                message,
+                deadline,
+                reply,
+            }) => {
+                let result = (|| {
+                    if Instant::now() >= deadline {
+                        bail!("terminal controller request expired");
+                    }
+                    if child_exit.is_some() || final_exit.is_some() || reader_eof {
+                        bail!("terminal child has exited");
+                    }
+                    let subscriber = controller
+                        .as_ref()
+                        .and_then(|id| subscribers.get(id))
+                        .filter(|subscriber| !subscriber.is_disconnected())
+                        .ok_or_else(|| anyhow!("terminal has no live controller"))?;
+                    subscriber
+                        .events
+                        .try_send(StreamEvent::ControllerMessage {
+                            generation: controller_generation,
+                            message,
+                            expires_at: unix_ms().saturating_add(
+                                deadline
+                                    .saturating_duration_since(Instant::now())
+                                    .as_millis() as u64,
+                            ),
+                        })
+                        .map_err(|_| anyhow!("terminal controller is unavailable or busy"))?;
+                    Ok(())
+                })();
+                let _ = reply.send(result);
+            }
             #[cfg(not(windows))]
             Ok(ActorMessage::RefreshForegroundProcess { reply }) => {
                 if let Ok(master) = master.get() {
@@ -2267,6 +2376,7 @@ mod tests {
         (
             TerminalHandle {
                 order: 0,
+                control_token: None,
                 mode,
                 actor_tx,
                 actor_done,
@@ -2285,6 +2395,113 @@ mod tests {
             },
             writer_rx,
         )
+    }
+
+    #[test]
+    fn child_messages_follow_controller_takeover_without_replay() {
+        let (mut actor, _writer) = test_actor();
+        actor.control_token = Some("child-credential".into());
+        let service = TerminalService::default();
+        service.terminals.lock().unwrap().insert(1, Arc::new(actor));
+        assert!(
+            service
+                .notify_controller(1, "wrong", "pane.focus.left".into())
+                .is_err()
+        );
+        assert!(
+            service
+                .notify_controller(1, "child-credential", "pane.focus.left".into())
+                .is_err()
+        );
+        let first = service
+            .attach(1, 0, "first".into(), AttachmentRole::Controller, false)
+            .unwrap();
+        first.events.try_iter().for_each(drop);
+        service
+            .notify_controller(1, "child-credential", "pane.focus.left".into())
+            .unwrap();
+        assert!(
+            matches!(first.events.try_recv().unwrap(), StreamEvent::ControllerMessage { generation, message, .. }
+            if generation == first.generation && message == "pane.focus.left")
+        );
+        let second = service
+            .attach(1, 0, "second".into(), AttachmentRole::Controller, true)
+            .unwrap();
+        first.events.try_iter().for_each(drop);
+        second.events.try_iter().for_each(drop);
+        service
+            .notify_controller(1, "child-credential", "pane.focus.right".into())
+            .unwrap();
+        assert!(first.events.try_recv().is_err());
+        assert!(
+            matches!(second.events.try_recv().unwrap(), StreamEvent::ControllerMessage { generation, message, .. }
+            if generation == second.generation && message == "pane.focus.right")
+        );
+        assert!(service.replay(1, 0).unwrap().bytes.is_empty());
+        drop(second);
+        drop(first);
+        service.terminate(1).unwrap();
+        assert!(
+            service
+                .notify_controller(1, "child-credential", "pane.focus.left".into())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn expired_child_message_never_reaches_controller() {
+        let (actor, _writer) = test_actor();
+        let attached = actor
+            .request(|reply| ActorMessage::Attach {
+                offset: 0,
+                attachment_id: "controller".into(),
+                role: AttachmentRole::Controller,
+                takeover: false,
+                reply,
+            })
+            .unwrap();
+        attached.events.try_iter().for_each(drop);
+        let result = actor.request(|reply| ActorMessage::NotifyController {
+            message: "pane.focus.left".into(),
+            deadline: Instant::now() - Duration::from_secs(1),
+            reply,
+        });
+        assert!(result.unwrap_err().to_string().contains("expired"));
+        assert!(attached.events.try_recv().is_err());
+        actor.shutdown().unwrap();
+    }
+
+    #[test]
+    fn child_messages_reject_full_controller_queue_without_disconnect() {
+        let (mut actor, _writer) = test_actor();
+        actor.control_token = Some("child-credential".into());
+        let service = TerminalService::default();
+        service.terminals.lock().unwrap().insert(1, Arc::new(actor));
+        let attached = service
+            .attach(1, 0, "controller".into(), AttachmentRole::Controller, false)
+            .unwrap();
+        attached.events.try_iter().for_each(drop);
+        for _ in 0..SUBSCRIBER_QUEUE_CAPACITY {
+            service
+                .notify_controller(1, "child-credential", "queued".into())
+                .unwrap();
+        }
+        let started = Instant::now();
+        let error = service
+            .notify_controller(1, "child-credential", "rejected".into())
+            .unwrap_err();
+        assert!(error.to_string().contains("busy"));
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(attached.events.len(), SUBSCRIBER_QUEUE_CAPACITY);
+        attached.events.try_iter().for_each(drop);
+        service
+            .notify_controller(1, "child-credential", "resumed".into())
+            .unwrap();
+        assert!(matches!(attached.events.try_recv().unwrap(),
+            StreamEvent::ControllerMessage { message, generation, .. }
+            if message == "resumed" && generation == attached.generation));
+        drop(attached);
+        service.terminate(1).unwrap();
     }
 
     #[test]

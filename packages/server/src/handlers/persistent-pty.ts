@@ -3,6 +3,7 @@ import { PtyTicket } from "@opencode/core/pty/ticket"
 import {
   ForbiddenError,
   InvalidRequestError,
+  PtyFeatureUnsupportedError,
   PtyNotFoundError,
   ServiceUnavailableError,
 } from "@opencode/protocol/errors"
@@ -74,11 +75,14 @@ export const PersistentPtyHandler = HttpApiBuilder.group(Api, "server.experiment
                 env: ctx.payload.env,
                 cols: ctx.payload.size?.cols,
                 rows: ctx.payload.size?.rows,
+                childControl: ctx.payload.childControl,
               })
               .pipe(
                 Effect.catchTags({
                   "PersistentPty.InvalidCwdError": (error) =>
                     new InvalidRequestError({ message: error.message, kind: "invalid_cwd", field: "cwd" }),
+                  "PersistentPty.UnsupportedFeatureError": (error) =>
+                    new PtyFeatureUnsupportedError({ feature: error.feature, message: error.message }),
                   "PersistentPty.UnavailableError": unavailable,
                 }),
               ),

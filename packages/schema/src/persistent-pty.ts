@@ -31,6 +31,7 @@ export const CreateInput = Schema.Struct({
   title: Schema.String,
   env: Schema.Record(Schema.String, Schema.String),
   size: optional(Schema.Struct({ cols: PositiveInt, rows: PositiveInt })),
+  childControl: optional(Schema.Boolean),
 }).annotate({ identifier: "PersistentPty.CreateInput" })
 export interface CreateInput extends Schema.Schema.Type<typeof CreateInput> {}
 

@@ -68,6 +68,12 @@ export class RequestError extends Schema.TaggedError<RequestError>()("Persistent
   message: Schema.String,
 }) {}
 
+/** The running daemon cannot provide a requested capability; the request never ran. */
+export class UnsupportedFeatureError extends Schema.TaggedError<UnsupportedFeatureError>()(
+  "PersistentPty.UnsupportedFeatureError",
+  { feature: Schema.String, message: Schema.String },
+) {}
+
 export class NotFoundError extends Schema.TaggedError<NotFoundError>()("PersistentPty.NotFoundError", {
   ptyID: Pty.ID,
 }) {}
@@ -139,8 +145,9 @@ export interface Interface {
       readonly env: Readonly<Record<string, string>>
       readonly cols?: number
       readonly rows?: number
+      readonly childControl?: boolean
     },
-  ) => Effect.Effect<Info, InvalidCwdError | UnavailableError>
+  ) => Effect.Effect<Info, InvalidCwdError | UnavailableError | UnsupportedFeatureError>
   readonly write: (
     id: Pty.ID,
     data: string,
@@ -249,21 +256,30 @@ const makeLayer = (options: Options = {}) =>
           ),
         )
         if (!directory) return yield* new InvalidCwdError({ cwd, message: `cwd is not a directory: ${cwd}` })
-        const response = yield* request(
-          daemon,
-          {
-            op: "create_pty",
-            program: input.command ?? ShellSelect.environment(global.bin),
-            args: input.args,
-            cwd,
-            title: input.title,
-            group_id: sessionID,
-            env: input.env,
-            cols: input.cols ?? 80,
-            rows: input.rows ?? 24,
-          },
-          true,
-        )
+        const response = yield* daemon
+          .request(
+            {
+              op: "create_pty",
+              program: input.command ?? ShellSelect.environment(global.bin),
+              args: input.args,
+              cwd,
+              title: input.title,
+              group_id: sessionID,
+              env: input.env,
+              cols: input.cols ?? 80,
+              rows: input.rows ?? 24,
+              ...(input.childControl ? { child_control: true } : {}),
+            },
+            true,
+            input.childControl ? "child-control" : undefined,
+          )
+          .pipe(
+            Effect.mapError((error) =>
+              error.kind === "feature"
+                ? new UnsupportedFeatureError({ feature: "child-control", message: error.message })
+                : unavailable(error),
+            ),
+          )
         if (response.type !== "created") return yield* unexpected(response)
         const terminal = toInfo(response.process)
         yield* bus.publish(Added, { sessionID, terminal })
